@@ -1,0 +1,70 @@
+{
+  "name": "ngx-seo",
+  "version": "0.1.0",
+  "description": "Layered SEO and AEO head management for Angular SSR and SPA lifecycles",
+  "license": "MIT",
+  "author": "Joseph R. Quinn",
+  "keywords": [
+    "angular",
+    "seo",
+    "aeo",
+    "ssr",
+    "json-ld",
+    "open-graph",
+    "meta"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "dist/fesm2022/ngx-seo.mjs",
+  "module": "dist/fesm2022/ngx-seo.mjs",
+  "types": "dist/types/ngx-seo.d.ts",
+  "typings": "dist/types/ngx-seo.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/ngx-seo.d.ts",
+      "default": "./dist/fesm2022/ngx-seo.mjs"
+    },
+    "./package.json": {
+      "default": "./package.json"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "ng-packagr -p ng-package.json -c tsconfig.lib.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@angular/common": "^21.0.0",
+    "@angular/core": "^21.0.0",
+    "@angular/platform-browser": "^21.0.0",
+    "@angular/router": "^21.0.0"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.21.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.21.0",
+  "devDependencies": {
+    "@angular/common": "^21.2.26",
+    "@angular/compiler": "^21.2.26",
+    "@angular/compiler-cli": "^21.2.26",
+    "@angular/core": "^21.2.26",
+    "@angular/platform-browser": "^21.2.26",
+    "@angular/platform-server": "^21.2.26",
+    "@angular/router": "^21.2.26",
+    "jsdom": "^31.0.1",
+    "ng-packagr": "^21.2.7",
+    "rxjs": "^7.8.2",
+    "tslib": "^2.9.1",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.12"
+  }
+}
