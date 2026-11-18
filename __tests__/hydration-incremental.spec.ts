@@ -225,19 +225,29 @@ describe('incremental hydration', () => {
   it('keeps every contribution on one host, such as a host directive', async () => {
     @Directive({ selector: '[seoKeywords]' })
     class SeoKeywords {
-      readonly seo = injectSeo({ keywords: ['k1'], jsonLd: [{ '@type': 'Thing', '@id': '#dir' }] });
+      readonly seo = injectSeo({ keywords: ['k1'], jsonLd: [{ '@type': 'Thing', '@id': '#dir' }, { '@type': 'Thing', name: 'dir-node' }] });
     }
     @Component({ selector: 'deferred-x', hostDirectives: [SeoKeywords], template: '<p>x</p>' })
     class DeferredX {
-      readonly seo = injectSeo({ description: 'deferred-desc' });
+      readonly seo = injectSeo({ description: 'deferred-desc', jsonLd: [{ '@type': 'Thing', name: 'comp-node' }] });
     }
-    @Component({ selector: 'page-host', imports: [DeferredX], template: '<p>page</p> @defer (hydrate on interaction) { <deferred-x /> }' })
+    @Component({ selector: 'page-host', imports: [DeferredX], template: '<p>page</p> @defer (hydrate on timer(100ms)) { <deferred-x /> }' })
     class PageHost {}
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { appRef } = await hydrate(App, [{ path: 'h', component: PageHost }], '/h', { baseUrl: 'https://x.test' } as typeof site);
     expect(document.head.querySelector('meta[name="keywords"]')?.getAttribute('content')).toBe('k1');
     expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('deferred-desc');
     expect(document.head.querySelector('script[type="application/ld+json"]')?.textContent).toContain('#dir');
+    for (let i = 0; i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      appRef.tick();
+    }
+    // After the host hydrates, each contribution claimed its own copy: nothing is doubled.
+    expect(document.querySelector('deferred-x p')).not.toBeNull();
+    const hydratedGraph = document.head.querySelector('script[type="application/ld+json"]')?.textContent ?? '';
+    expect(hydratedGraph.match(/dir-node/g)).toHaveLength(1);
+    expect(hydratedGraph.match(/comp-node/g)).toHaveLength(1);
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('deferred-desc');
     errors.mockRestore();
     appRef.destroy();
     destroyPlatform();
@@ -376,7 +386,7 @@ describe('incremental hydration', () => {
     }
     @Injectable()
     class SvcB {
-      readonly seo = injectSeo({ keywords: ['b'] });
+      readonly seo = injectSeo({ keywords: ['b'], jsonLd: [{ '@type': 'Thing', name: 'b-node' }] });
     }
     @Component({ selector: 'details-a', template: '<p>a</p>' })
     class DetailsA {
@@ -402,6 +412,8 @@ describe('incremental hydration', () => {
     expect(parsed.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
     expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
     expect(document.head.querySelector('meta[name="keywords"]')?.getAttribute('content')).toBe('b');
+    // SvcB continued its own copy (matched by config), so its node is not doubled.
+    expect((document.head.querySelector('script[type="application/ld+json"]')?.textContent ?? '').match(/b-node/g)).toHaveLength(1);
     errors.mockRestore();
     appRef.destroy();
     destroyPlatform();
@@ -463,6 +475,38 @@ describe('incremental hydration', () => {
       { baseUrl: 'https://x.test' } as typeof site,
     );
     expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
+    // The live service outranks any server copy it could not be matched to.
+    expect(document.head.querySelector('meta[name="keywords"]')?.getAttribute('content')).toBe('b-browser');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('carries a service from a lazily loaded route', async () => {
+    @Injectable()
+    class LazySvc {
+      readonly seo = injectSeo({ description: 'lazy-desc' });
+    }
+    @Component({ selector: 'lazy-x', template: '<p>l</p>' })
+    class LazyX {
+      readonly svc = inject(LazySvc);
+    }
+    @Component({ selector: 'page-l', imports: [LazyX], template: '@defer (hydrate on interaction) { <lazy-x /> }' })
+    class PageL {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(
+      App,
+      [
+        { path: 'other', component: PageL },
+        {
+          path: 'lazy',
+          loadChildren: () => Promise.resolve([{ path: '', component: PageL, providers: [LazySvc], data: { seo: { description: 'route-desc' } } }]),
+        },
+      ],
+      '/lazy',
+      { baseUrl: 'https://x.test' } as typeof site,
+    );
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('lazy-desc');
     errors.mockRestore();
     appRef.destroy();
     destroyPlatform();

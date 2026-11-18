@@ -7,6 +7,7 @@ import {
   Injectable,
   Injector,
   InjectionToken,
+  NgZone,
   TransferState,
   makeStateKey,
   PLATFORM_ID,
@@ -34,6 +35,7 @@ import {
   type Route,
   Router,
   TitleStrategy,
+  type UrlSegmentGroup,
 } from '@angular/router';
 import { diagnose } from './diagnostics';
 import { resolveHead } from './derive';
@@ -103,6 +105,26 @@ export const SEO_TAKEOVER_TIMEOUT = new InjectionToken<number>('SEO_TAKEOVER_TIM
   providedIn: 'root',
   factory: () => 1000,
 });
+
+/** The router URL with named-outlet segments removed: one primary page, one canonical. */
+function primaryUrl(router: Router): string {
+  try {
+    const tree = router.parseUrl(router.url);
+    const strip = (group: UrlSegmentGroup): void => {
+      for (const outlet of Object.keys(group.children)) {
+        if (outlet === PRIMARY_OUTLET) {
+          strip(group.children[outlet]);
+        } else {
+          delete group.children[outlet];
+        }
+      }
+    };
+    strip(tree.root);
+    return router.serializeUrl(tree);
+  } catch {
+    return router.url;
+  }
+}
 
 /** The value of a contribution that is waiting for a required input. */
 const NOT_READY: SeoConfig = Object.freeze({});
@@ -191,6 +213,8 @@ export class Seo {
   private readonly serverCopies = signal<ReadonlyMap<string, ServerCopy>>(new Map());
   /** Browser only: the server's creation order of every hosted contribution, so both sides rank alike. */
   private serverOrders = new Map<string, number>();
+  /** Browser only: unkeyed route-service contributions created so far per route key. */
+  private readonly liveRouteCounts = new Map<string, number>();
   /** Contributions made so far per route key, for route-bound copy ids. */
   private readonly routeSeq = new Map<string, number>();
   /** Browser only: how many contributions each host has claimed so far. */
@@ -365,6 +389,13 @@ export class Seo {
             hostId = `r:${key}#${seq}`;
           } else {
             hostId = this.claimRouteCopy(key, config);
+            this.settleRouteCopies(key, hostId);
+            if (hostId === null && this.recordedRouteCopies(key).length > 0) {
+              // Not matched to a server copy: rank above every server contribution,
+              // so a leftover copy can never override this live one.
+              order = Math.max(this.nextOrder, this.maxServerOrder + 1);
+              this.nextOrder = order + 1;
+            }
           }
         }
       }
@@ -433,6 +464,7 @@ export class Seo {
    */
   private async takeOverAfterHydration(): Promise<void> {
     const appRef = inject(ApplicationRef);
+    const zone = inject(NgZone);
     const timeout = inject(SEO_TAKEOVER_TIMEOUT);
     const router = this.router;
     try {
@@ -455,7 +487,8 @@ export class Seo {
       // recurring timers may never be stable), or the next navigation.
       let cleanup = (): void => {};
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, timeout);
+        // Outside the zone: a pending zone timer would itself keep the app unstable.
+        const timer = zone.runOutsideAngular(() => setTimeout(resolve, timeout));
         const subscription = router?.events.subscribe((event) => {
           if (event instanceof NavigationEnd) {
             resolve();
@@ -509,7 +542,7 @@ export class Seo {
     };
     const sync = (): void => {
       trackAttached();
-      this.path.set(this.withBasePath(router.url));
+      this.path.set(this.withBasePath(primaryUrl(router)));
       this.routeLayers.set(
         collectRouteLayers(router.routerState.snapshot.root, key, injector, (error) => this.report(error), this.ownsTitles),
       );
@@ -643,9 +676,36 @@ export class Seo {
    * copy is matched only when that is unambiguous: the route has a single
    * copy, or exactly one unclaimed copy has the same config.
    */
-  private claimRouteCopy(routeKey: string, config: SeoConfig | (() => SeoConfig)): string | null {
+  private recordedRouteCopies(routeKey: string): string[] {
     const prefix = `r:${routeKey}#`;
-    const recorded = [...this.serverOrders.keys()].filter((id) => id.startsWith(prefix) && !id.startsWith(`${prefix}k:`));
+    return [...this.serverOrders.keys()].filter((id) => id.startsWith(prefix) && !id.startsWith(`${prefix}k:`));
+  }
+
+  /**
+   * Once the browser has as many unkeyed service contributions on a route as
+   * the server recorded, every one exists live: drop that route's leftover copies.
+   */
+  private settleRouteCopies(routeKey: string, claimed: string | null): void {
+    const live = (this.liveRouteCounts.get(routeKey) ?? 0) + 1;
+    this.liveRouteCounts.set(routeKey, live);
+    const recorded = this.recordedRouteCopies(routeKey);
+    if (recorded.length === 0 || live < recorded.length) {
+      return;
+    }
+    const leftovers = recorded.filter((id) => id !== claimed && untracked(this.serverCopies).has(id));
+    if (leftovers.length > 0) {
+      this.serverCopies.update((copies) => {
+        const next = new Map(copies);
+        for (const id of leftovers) {
+          next.delete(id);
+        }
+        return next;
+      });
+    }
+  }
+
+  private claimRouteCopy(routeKey: string, config: SeoConfig | (() => SeoConfig)): string | null {
+    const recorded = this.recordedRouteCopies(routeKey);
     if (recorded.length === 1) {
       return recorded[0];
     }

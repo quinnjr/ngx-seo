@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   ApplicationRef,
   Component,
+  NgZone,
   PendingTasks,
   inject,
   provideEnvironmentInitializer,
@@ -137,6 +138,41 @@ describe('hydration', () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     TestBed.tick();
     expect(document.head.querySelector('meta[name="author"]')?.getAttribute('content')).toBe('client');
+  });
+
+  it('keeps the takeover timer outside the Angular zone', () => {
+    let insideOutsideZone = false;
+    const timersOutside: number[] = [];
+    const timersInside: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const timerSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: () => void, delay?: number) => {
+      (insideOutsideZone ? timersOutside : timersInside).push(delay ?? 0);
+      return realSetTimeout(handler, delay);
+    }) as typeof setTimeout);
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: SEO_TAKEOVER_TIMEOUT, useValue: 12345 },
+        // Runs before provideSeo's initializer creates the Seo service.
+        provideEnvironmentInitializer(() => {
+          const zone = inject(NgZone);
+          const original = zone.runOutsideAngular.bind(zone);
+          vi.spyOn(zone, 'runOutsideAngular').mockImplementation(<T>(fn: () => T): T => {
+            insideOutsideZone = true;
+            try {
+              return original(fn);
+            } finally {
+              insideOutsideZone = false;
+            }
+          });
+        }),
+        provideSeo({ baseUrl: 'https://x.test' }),
+      ],
+    });
+    TestBed.inject(Seo);
+    timerSpy.mockRestore();
+    expect(timersOutside).toContain(12345);
+    expect(timersInside).not.toContain(12345);
   });
 });
 

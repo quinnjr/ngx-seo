@@ -132,7 +132,8 @@ That is the whole declaration. The document title, canonical, `og:*`,
   Angular copies down from the parent route is counted once.
 - **Primary outlet only.** Only routes on the primary outlet chain are read.
   Named outlets do not contribute SEO data, neither from route data nor from
-  `injectSeo` in their components.
+  `injectSeo` in their components, and their URL segments are left out of
+  the derived canonical.
 - **Resolvers** write into route data, so `resolve: { seo: postSeoResolver }`
   works with no extra API. This is the recommended path for CMS and blog
   pages, because the data is ready before the server renders the page.
@@ -372,6 +373,9 @@ page asks to override it any more.
       the match is certain: the route has one copy, or one copy has the same
       config. If a service's config can differ between server and browser,
       give it a stable identity: `injectSeo(config, { key: 'product' })`.
+      Without one, an unmatched live service still outranks every server
+      copy. Its own leftover copy goes once all the route's services exist
+      in the browser, or on the first client navigation.
     - **Before the owner hydrates:** a component inside `@defer (hydrate …)`
       keeps contributing the server's copy, ranked in the server's order.
     - **After:** once it hydrates, its own contribution takes over.

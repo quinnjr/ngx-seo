@@ -490,5 +490,15 @@ describe('route lifecycle', () => {
     expect(applied.length).toBeGreaterThan(0);
     expect(applied.every(Boolean)).toBe(true);
   });
+
+  it('keeps named-outlet segments out of the canonical', async () => {
+    @Component({ selector: 'seo-shell3', imports: [RouterOutlet], template: '<router-outlet /><router-outlet name="side" />' })
+    class Shell3 {}
+    const { go } = await setup([
+      { path: 'page', component: Shell3, children: [{ path: 'popup', outlet: 'side', component: Page }] },
+    ]);
+    await go('/page/(side:popup)');
+    expect(canonical()).toBe('https://x.test/page');
+  });
 });
 

@@ -346,3 +346,13 @@ describe('HeadReconciler Trusted Types policy', () => {
   });
 });
 
+describe('HeadReconciler href adoption', () => {
+  it('adopts an index.html link whose href only differs by URL normalisation', () => {
+    const doc = makeDoc('<link rel="preconnect" href="https://cdn.test">');
+    new HeadReconciler(doc).apply(
+      headOf([{ key: 'link:preconnect:https://cdn.test/', tag: 'link', attrs: { rel: 'preconnect', href: 'https://cdn.test/' } }]),
+    );
+    expect(doc.head.querySelectorAll('link[rel="preconnect"]')).toHaveLength(1);
+  });
+});
+
