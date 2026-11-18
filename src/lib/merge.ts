@@ -53,6 +53,9 @@ const HIGHER_FIRST = new Set(['openGraph.images']);
 /** Lists whose keys are compared case-insensitively, as their HTML counterparts are. */
 const CASE_INSENSITIVE = new Set(['alternates', 'meta', 'links']);
 
+/** Plain lists where a single object or string stands for a one-item list. */
+const WHOLE_LISTS = new Set(['openGraph.videos', 'openGraph.audio']);
+
 /** Values that are replaced whole instead of merged field by field. */
 const ATOMIC_OBJECTS = new Set(['image']);
 
@@ -147,6 +150,20 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
   // Repeated meta (video:tag, article:tag, …) without an explicit key: a layer's
   // items with one identity form a group, all kept, replacing lower groups.
   const groupedMeta = path === 'meta';
+  /** Meta items this layer has placed, so they are never mistaken for lower ones. */
+  const thisLayer = new Set<unknown>();
+  /** Removes every matching item; returns where the first one was, or -1. */
+  const removeWhere = (list: unknown[], match: (item: Bag) => boolean): number => {
+    let first = -1;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const item = list[i];
+      if (isPlainObject(item) && match(item)) {
+        list.splice(i, 1);
+        first = i;
+      }
+    }
+    return first;
+  };
   /** Where the next item of a claimed group goes in `result`; -1 means append to `fresh`. */
   const groupSlots = new Map<string, number>();
 
@@ -168,12 +185,35 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
       fresh.push(copy);
       continue;
     }
-    if (groupedMeta && text(plain['key']) === undefined) {
-      const group = key.toLowerCase();
-      if (!groupSlots.has(group)) {
-        // The group replaces the lower one in place, keeping its position.
-        groupSlots.set(group, removeAll(result, key));
+    if (groupedMeta) {
+      const explicit = text(plain['key']);
+      if (explicit !== undefined) {
+        // The same explicit key twice in one layer: the later item wins.
+        const sameLayer = [...thisLayer].find((entry) => isPlainObject(entry) && same(keyOf(entry), explicit));
+        if (sameLayer !== undefined) {
+          const list = result.includes(sameLayer) ? result : fresh;
+          list[list.indexOf(sameLayer)] = copy;
+          thisLayer.delete(sameLayer);
+          thisLayer.add(copy);
+          continue;
+        }
       }
+      const identity = metaIdentity(plain);
+      const group = (identity ?? key).toLowerCase();
+      if (!groupSlots.has(group)) {
+        // The group replaces lower items with this identity or key, in place.
+        groupSlots.set(
+          group,
+          removeWhere(
+            result,
+            (entry) =>
+              !thisLayer.has(entry) &&
+              ((identity !== undefined && metaIdentity(entry)?.toLowerCase() === identity.toLowerCase()) ||
+                (explicit !== undefined && same(keyOf(entry), explicit))),
+          ),
+        );
+      }
+      thisLayer.add(copy);
       const slot = groupSlots.get(group) as number;
       if (slot === -1) {
         fresh.push(copy);
@@ -260,8 +300,10 @@ function mergeFields(
       target[key] = mergeKeyedList(existing, list, here);
       continue;
     }
-    if (Array.isArray(value)) {
-      target[key] = value.filter((item) => item !== null && item !== undefined && item !== '').map((item) => cloneValue(item));
+    // A single media object or URL counts as a one-item list, replaced whole.
+    const listValue = WHOLE_LISTS.has(here) && (typeof value === 'string' || isPlainObject(value)) ? [value] : value;
+    if (Array.isArray(listValue)) {
+      target[key] = listValue.filter((item) => item !== null && item !== undefined && item !== '').map((item) => cloneValue(item));
       continue;
     }
     if (isPlainObject(value) && ancestors.has(value)) {

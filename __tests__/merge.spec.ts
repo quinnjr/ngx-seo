@@ -404,4 +404,19 @@ describe('mergeLayers', () => {
     const merged = mergeLayers([{ meta: [{ property: 'og:image', content: '/site.png' }] }, { image: { url: '' } }]);
     expect(merged.meta).toEqual([{ property: 'og:image', content: '/site.png' }]);
   });
+
+  it('replaces a single Open Graph video object whole rather than field by field', () => {
+    const merged = mergeLayers([
+      { openGraph: { videos: { url: '/a.mp4', type: 'video/mp4', width: 1280 } as never } },
+      { openGraph: { videos: { url: '/b.webm' } as never } },
+    ]);
+    expect(merged.openGraph?.videos).toEqual([{ url: '/b.webm' }]);
+  });
+
+  it('lets a higher layer meta replace lower items with the same name whatever their key', () => {
+    const one = mergeLayers([{ meta: [{ key: 'site-desc', name: 'description', content: 'site' }] }, { meta: [{ name: 'description', content: 'page' }] }]);
+    expect(one.meta).toEqual([{ name: 'description', content: 'page' }]);
+    const two = mergeLayers([{ meta: [{ name: 'description', content: 'site' }] }, { meta: [{ key: 'x', name: 'description', content: 'page' }] }]);
+    expect(two.meta).toEqual([{ key: 'x', name: 'description', content: 'page' }]);
+  });
 });

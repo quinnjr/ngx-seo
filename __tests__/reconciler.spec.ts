@@ -303,3 +303,25 @@ describe('HeadReconciler meta media', () => {
   });
 });
 
+describe('HeadReconciler under Trusted Types', () => {
+  it('writes JSON-LD without assigning script textContent', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent') as PropertyDescriptor;
+    const doc = makeDoc();
+    Object.defineProperty(HTMLScriptElement.prototype, 'textContent', {
+      configurable: true,
+      get: descriptor.get,
+      set() {
+        throw new TypeError("This document requires 'TrustedScript' assignment.");
+      },
+    });
+    try {
+      const reconciler = new HeadReconciler(doc);
+      reconciler.apply(headOf([jsonLd('{"page":"A"}')]));
+      reconciler.apply(headOf([jsonLd('{"page":"B"}')]));
+      expect(doc.head.querySelector('script[type="application/ld+json"]')?.textContent).toBe('{"page":"B"}');
+    } finally {
+      delete (HTMLScriptElement.prototype as unknown as Record<string, unknown>)['textContent'];
+    }
+  });
+});
+

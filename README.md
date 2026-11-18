@@ -11,8 +11,10 @@ duplicates after hydration and nothing stale after a client navigation.
 
 - Zoneless and signal-based. No third-party runtime dependencies; only
   `tslib`, which every ng-packagr-built Angular library uses.
-- Peer dependencies: `@angular/core`, `@angular/common`,
-  `@angular/platform-browser` and `@angular/router`, all `^21.0.0`.
+- Peer dependencies: `@angular/core`, `@angular/common` and
+  `@angular/router`, all `^21.0.0`.
+- Works with Trusted Types enforced: JSON-LD is written as a text node, not
+  through a script sink.
 
 ## Install
 
@@ -127,7 +129,8 @@ That is the whole declaration. The document title, canonical, `og:*`,
   always applied, even if an ancestor uses the same object. Only a value
   Angular copies down from the parent route is counted once.
 - **Primary outlet only.** Only routes on the primary outlet chain are read.
-  Named outlets do not contribute SEO data.
+  Named outlets do not contribute SEO data, neither from route data nor from
+  `injectSeo` in their components.
 - **Resolvers** write into route data, so `resolve: { seo: postSeoResolver }`
   works with no extra API. This is the recommended path for CMS and blog
   pages, because the data is ready before the server renders the page.
@@ -275,7 +278,7 @@ All fields are optional.
 | `openGraph` | `title`, `description`, `type`, `url`, `siteName`, `locale`, `alternateLocales`, `images`, `videos`, `audio`, `article`, `profile`, `book`. |
 | `twitter` | `card`, `site`, `creator`, `title`, `description`, `image`, `imageAlt`. |
 | `jsonLd` | `JsonLdNode[]`. |
-| `meta` | Extra `{ name \| property \| httpEquiv, content, media?, key? }[]`. `media` is part of the identity, so light and dark `theme-color` variants are separate tags. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it within the same layer. A higher layer that sets the field itself (`description`, `robots`, `openGraph.title`, …) wins over lower extra tags, so site-wide values moved from `index.html` into `defaults.meta` never override a page. Repeated properties (`video:tag`, `music:song`, …) are all kept: a layer's items with the same identity form a group that replaces a lower layer's group. An extra `og:image` (or `og:video`, `og:audio`) replaces the whole derived item, including its size and alt tags, and `twitter:image` follows it. |
+| `meta` | Extra `{ name \| property \| httpEquiv, content, media?, key? }[]`. `media` is part of the identity, so light and dark `theme-color` variants are separate tags. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it within the same layer. A higher layer that sets the field itself (`description`, `robots`, `openGraph.title`, …) wins over lower extra tags, so site-wide values moved from `index.html` into `defaults.meta` never override a page. Repeated properties (`video:tag`, `music:song`, …) are all kept: a layer's items with the same identity form a group that replaces a lower layer's items of that identity, whatever their `key`. An extra `og:image` (or `og:video`, `og:audio`) replaces the whole derived item, including its size and alt tags, and `twitter:image` follows it. |
 | `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, as?, crossorigin?, fetchpriority?, referrerpolicy?, color?, key? }[]`. A `canonical` or `alternate`+`hreflang` link replaces the derived one; a custom `key` never does. `rel`, meta names and `hreflang` are compared case-insensitively. |
 | `http` | `{ status, headers }`, applied to the server response. |
 

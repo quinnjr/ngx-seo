@@ -26,6 +26,7 @@ import {
   NavigationEnd,
   NavigationError,
   NavigationSkipped,
+  PRIMARY_OUTLET,
   ROUTES,
   type ActivatedRoute,
   type Route,
@@ -338,6 +339,7 @@ export class Seo {
     const key = this.site.routeDataKey ?? 'seo';
     const trackAttached = (): void => {
       const routes = new Set<ActivatedRoute | Route>();
+      // Only the primary chain: named outlets never contribute, from data or components.
       const visit = (route: ActivatedRoute): void => {
         routes.add(route);
         const config = route.snapshot?.routeConfig;
@@ -345,7 +347,9 @@ export class Seo {
           routes.add(config);
         }
         for (const child of route.children) {
-          visit(child);
+          if (child.outlet === PRIMARY_OUTLET) {
+            visit(child);
+          }
         }
       };
       visit(router.routerState.root);

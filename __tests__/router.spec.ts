@@ -445,5 +445,20 @@ describe('route lifecycle', () => {
     expect(warn.mock.calls.filter((call) => String(call[0]).includes('title'))).toEqual([]);
     warn.mockRestore();
   });
+
+  it('ignores injectSeo from a component in a named outlet', async () => {
+    @Component({ selector: 'seo-popup', template: '' })
+    class Popup {
+      readonly seo = injectSeo({ title: 'POPUP', robots: { index: false } });
+    }
+    @Component({ selector: 'seo-shell2', imports: [RouterOutlet], template: '<router-outlet /><router-outlet name="side" />' })
+    class Shell2 {}
+    const { go } = await setup([
+      { path: 'page', component: Shell2, data: { seo: { title: 'Page' } }, children: [{ path: 'popup', outlet: 'side', component: Popup }] },
+    ]);
+    await go('/page/(side:popup)');
+    expect(document.title).toBe('Page | S');
+    expect(meta('robots')).toBeNull();
+  });
 });
 

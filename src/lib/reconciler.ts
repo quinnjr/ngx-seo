@@ -18,6 +18,17 @@ function elementsOf(parent: Element): Element[] {
   return out;
 }
 
+/**
+ * Replaces an element's text through a text node. Assigning `textContent` on a
+ * `<script>` is a Trusted Types sink and throws when Trusted Types are enforced.
+ */
+function setText(el: Element, text: string): void {
+  while (el.firstChild) {
+    el.removeChild(el.firstChild);
+  }
+  el.appendChild((el.ownerDocument ?? document).createTextNode(text));
+}
+
 function tagName(el: Element): string {
   return el.tagName.toLowerCase();
 }
@@ -277,7 +288,7 @@ export class HeadReconciler {
       el.setAttribute(name, value);
     }
     if (original.text !== null && el.textContent !== original.text) {
-      el.textContent = original.text;
+      setText(el, original.text);
     }
   }
 
@@ -301,7 +312,7 @@ export class HeadReconciler {
       }
     }
     if (tag.text !== undefined && el.textContent !== tag.text) {
-      el.textContent = tag.text;
+      setText(el, tag.text);
     }
   }
 
