@@ -108,4 +108,104 @@ describe('incremental hydration', () => {
     appRef.destroy();
     destroyPlatform();
   });
+
+  async function hydrate(app: typeof App, appRoutes: Routes, url: string, config = site) {
+    const html = await renderApplication(
+      (context: BootstrapContext) =>
+        bootstrapApplication(
+          app,
+          {
+            providers: [
+              provideZonelessChangeDetection(),
+              provideServerRendering(),
+              provideClientHydration(withIncrementalHydration()),
+              provideRouter(appRoutes),
+              provideSeo(config),
+            ],
+          },
+          context,
+        ),
+      { document: SHELL, url },
+    );
+    destroyPlatform();
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    for (const attr of Array.from(parsed.documentElement.attributes)) {
+      document.documentElement.setAttribute(attr.name, attr.value);
+    }
+    document.head.innerHTML = parsed.head.innerHTML;
+    document.body.innerHTML = parsed.body.innerHTML;
+    history.replaceState(null, '', url);
+    const appRef = await bootstrapApplication(app, {
+      providers: [
+        provideZonelessChangeDetection(),
+        provideClientHydration(withIncrementalHydration()),
+        provideRouter(appRoutes),
+        provideSeo(config),
+      ],
+    });
+    await appRef.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    appRef.tick();
+    return { parsed, appRef };
+  }
+
+  it('keeps the server order and ignores named outlets before deferred blocks hydrate', async () => {
+    @Component({ selector: 'app-root', imports: [RouterOutlet], template: '<router-outlet /><router-outlet name="side" />' })
+    class TwoOutlets {}
+    @Component({ selector: 'child-seo', template: '<p>child</p>' })
+    class Child {
+      readonly seo = injectSeo({ description: 'child-desc' });
+    }
+    @Component({ selector: 'side-seo', template: '<p>side</p>' })
+    class SideInner {
+      readonly seo = injectSeo({ title: 'SIDE-LEAK' });
+    }
+    @Component({ selector: 'side-page', imports: [SideInner], template: '@defer (hydrate on interaction) { <side-seo /> }' })
+    class SidePage {}
+    @Component({ selector: 'page-x', imports: [Child], template: '<p>page</p> @defer (hydrate on interaction) { <child-seo /> }' })
+    class PageX {
+      readonly seo = injectSeo({ description: 'page-desc' });
+    }
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { parsed, appRef } = await hydrate(
+      TwoOutlets,
+      [
+        { path: 'p', component: PageX, data: { seo: { title: 'P' } } },
+        { path: 's', component: SidePage, outlet: 'side' },
+      ],
+      '/p(side:s)',
+      { baseUrl: 'https://x.test' } as typeof site,
+    );
+    expect(parsed.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('child-desc');
+    expect(parsed.title).toBe('P');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('child-desc');
+    expect(document.title).toBe('P');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('hands over from the server copy to the hydrated component without duplicates', async () => {
+    @Component({
+      selector: 'faq-page',
+      imports: [FaqSection],
+      template: '<p>page</p> @defer (hydrate on timer(100ms)) { <faq-section [items]="items" /> }',
+    })
+    class TimedFaqPage {
+      readonly items = [{ question: 'Q', answer: 'A' }];
+    }
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(App, [{ path: 'faq', component: TimedFaqPage, data: { seo: { title: 'FAQ' } } }], '/faq');
+    for (let i = 0; i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      appRef.tick();
+    }
+    const graph = document.head.querySelector('script[type="application/ld+json"]')?.textContent ?? '';
+    expect(graph.match(/FAQPage/g)).toHaveLength(1);
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('faq-desc');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
 });
+

@@ -66,6 +66,7 @@ export function injectSeo(config: SeoConfig | (() => SeoConfig), options: Inject
     priority: options.priority,
     destroyRef: inject(DestroyRef),
     route,
-    host: host?.nativeElement instanceof Object ? (host.nativeElement as Element) : null,
+    // Duck-typed: `instanceof` fails across realms (iframes, test DOMs).
+    host: typeof (host?.nativeElement as Element | undefined)?.getAttribute === 'function' ? (host?.nativeElement as Element) : null,
   });
 }

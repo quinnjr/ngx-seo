@@ -183,6 +183,8 @@ export class Seo {
    * have not hydrated yet (for example inside `@defer (hydrate …)`).
    */
   private readonly serverCopies = signal<ReadonlyMap<string, ServerCopy>>(new Map());
+  /** Browser only: the server's creation order of every hosted contribution, so both sides rank alike. */
+  private serverOrders = new Map<string, number>();
   /** Depth of reactive computation; errors raised inside are delivered after it. */
   private computing = 0;
   private pendingErrors: unknown[] = [];
@@ -261,6 +263,7 @@ export class Seo {
       const copies = this.transferState.get(SERVER_COPIES, null);
       this.transferState.remove(SERVER_COPIES);
       if (Array.isArray(copies)) {
+        this.serverOrders = new Map(copies.map((copy) => [copy.id, copy.order]));
         this.serverCopies.set(new Map(copies.map((copy) => [copy.id, copy])));
       }
       void this.takeOverAfterHydration();
@@ -313,6 +316,7 @@ export class Seo {
       return { ...base, ...patches() };
     });
     let hostId: string | null = null;
+    let order: number | null = null;
     const host = options.host ?? null;
     if (host !== null) {
       try {
@@ -322,6 +326,11 @@ export class Seo {
         } else {
           hostId = host.getAttribute(SEO_HOST_ATTR);
           const claimed = hostId;
+          const serverOrder = claimed === null ? undefined : this.serverOrders.get(claimed);
+          if (serverOrder !== undefined) {
+            order = serverOrder;
+            this.nextOrder = Math.max(this.nextOrder, serverOrder + 1);
+          }
           if (claimed !== null && untracked(this.serverCopies).has(claimed)) {
             // The component has hydrated: its own contribution replaces the server copy.
             this.serverCopies.update((copies) => {
@@ -344,7 +353,7 @@ export class Seo {
       hostId,
       route: isRoot ? null : route,
       priority: options.priority ?? 0,
-      order: this.nextOrder++,
+      order: order ?? this.nextOrder++,
       value,
     };
     this.contributions.update((list) => [...list, contribution]);
@@ -485,13 +494,14 @@ export class Seo {
     const attached = this.attached();
     const live = this.contributions()
       .filter((item) => item.route === null || attached === null || attached.has(item.route))
-      .map((item) => ({ priority: item.priority, server: false, order: item.order, value: item.value }));
+      .map((item) => ({ priority: item.priority, order: item.order, value: item.value }));
     // Server copies stand in for components that have not hydrated, while their host is still in the page.
     const copies = [...this.serverCopies().values()]
       .filter((copy) => this.doc.querySelector?.(`[${SEO_HOST_ATTR}="${copy.id}"]`) != null)
-      .map((copy) => ({ priority: copy.priority, server: true, order: copy.order, value: () => copy.config }));
+      .map((copy) => ({ priority: copy.priority, order: copy.order, value: () => copy.config }));
+    // Hosted contributions keep the server's creation order, so copies and live ones rank as on the server.
     const contributions = [...copies, ...live]
-      .sort((a, b) => a.priority - b.priority || Number(b.server) - Number(a.server) || a.order - b.order)
+      .sort((a, b) => a.priority - b.priority || a.order - b.order)
       .map((item) => item.value())
       .filter((config) => {
         if (config === NOT_READY) {
@@ -565,8 +575,10 @@ export class Seo {
     }
     try {
       const copies: ServerCopy[] = [];
+      const attached = this.attached();
       for (const item of this.contributions()) {
-        if (item.hostId === null) {
+        // Only what applies on the server travels: hosted, and on an attached primary route.
+        if (item.hostId === null || (item.route !== null && attached !== null && !attached.has(item.route))) {
           continue;
         }
         const config = untracked(item.value);
