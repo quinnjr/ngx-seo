@@ -187,3 +187,68 @@ describe('HeadReconciler title restore', () => {
     expect(doc.title).toBe('Initial');
   });
 });
+
+describe('HeadReconciler originals across server and browser', () => {
+  it('lets the browser restore the shell title and html attributes the server recorded', () => {
+    const doc = makeDoc('', 'lang="en"');
+    doc.title = 'Shell';
+    new HeadReconciler(doc, { persistOriginals: true }).apply(
+      headOf([], { title: 'Post', htmlAttrs: { lang: 'de', dir: 'rtl' } }),
+    );
+    expect(doc.title).toBe('Post');
+
+    const browser = new HeadReconciler(doc);
+    browser.apply(headOf([], { title: null }));
+    expect(doc.title).toBe('Shell');
+    expect(doc.documentElement.getAttribute('lang')).toBe('en');
+    expect(doc.documentElement.hasAttribute('dir')).toBe(false);
+  });
+
+  it('leaves the title alone for a null title when it does not own titles', () => {
+    const doc = makeDoc();
+    const reconciler = new HeadReconciler(doc, { restoreTitle: false });
+    doc.title = 'Set by the app';
+    reconciler.apply(headOf([], { title: null }));
+    expect(doc.title).toBe('Set by the app');
+  });
+});
+
+describe('HeadReconciler adopted tags outside claimed families', () => {
+  it('restores an adopted index.html tag when no layer provides it any more, even across server and browser', () => {
+    const doc = makeDoc('<meta name="theme-color" content="red"><link rel="icon" href="/favicon.ico">');
+    new HeadReconciler(doc, { persistOriginals: true }).apply(
+      headOf([
+        { key: 'meta:name:theme-color', tag: 'meta', attrs: { name: 'theme-color', content: 'blue' } },
+        { key: 'link:icon:x', tag: 'link', attrs: { rel: 'icon', href: 'https://x.test/page.ico' } },
+      ]),
+    );
+    expect(doc.head.querySelector('meta[name="theme-color"]')?.getAttribute('content')).toBe('blue');
+
+    new HeadReconciler(doc).apply(headOf([]));
+    const theme = doc.head.querySelector('meta[name="theme-color"]');
+    expect(theme?.getAttribute('content')).toBe('red');
+    expect(theme?.hasAttribute(SEO_ATTR)).toBe(false);
+    expect(doc.head.querySelector('link[rel="icon"]')?.getAttribute('href')).toBe('/favicon.ico');
+  });
+});
+
+describe('HeadReconciler DOM failures', () => {
+  it('contains a DOM failure to the tag it occurred on, then reports it', () => {
+    const doc = makeDoc('<meta name="keywords" content="old">');
+    const reconciler = new HeadReconciler(doc);
+    const create = doc.createElement.bind(doc);
+    doc.createElement = ((name: string) => {
+      if (name === 'link') {
+        throw new Error('no links today');
+      }
+      return create(name);
+    }) as typeof doc.createElement;
+    expect(() =>
+      reconciler.apply(headOf([description('D'), canonical('https://x.test/'), jsonLd('{}')], { title: 'T' })),
+    ).toThrow('no links today');
+    expect(doc.title).toBe('T');
+    expect(doc.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('D');
+    expect(doc.head.querySelector('script[type="application/ld+json"]')).not.toBeNull();
+    expect(doc.head.querySelector('meta[name="keywords"]')).toBeNull();
+  });
+});

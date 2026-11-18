@@ -3,7 +3,7 @@ import { ApplicationRef, Component, destroyPlatform, provideZonelessChangeDetect
 import { getTestBed } from '@angular/core/testing';
 import { bootstrapApplication, provideClientHydration, type BootstrapContext } from '@angular/platform-browser';
 import { provideServerRendering, renderApplication } from '@angular/platform-server';
-import { RouterOutlet, provideRouter, type Routes } from '@angular/router';
+import { Router, RouterOutlet, provideRouter, type Routes } from '@angular/router';
 import { injectSeo } from '../src/lib/inject-seo';
 import { provideSeo } from '../src/lib/provide-seo';
 import { SEO_ATTR } from '../src/lib/reconciler';
@@ -17,11 +17,17 @@ class Post {
   readonly seo = injectSeo({ author: 'Ann', jsonLd: [{ '@type': 'BlogPosting', headline: 'H' }] });
 }
 
+@Component({ selector: 'seo-plain', template: '<p>plain</p>' })
+class Plain {}
+
 const routes: Routes = [
+  { path: 'plain', component: Plain },
   {
     path: 'post',
     component: Post,
-    resolve: { seo: () => new Promise<SeoConfig>((resolve) => setTimeout(() => resolve({ title: 'Post', description: 'About' }), 5)) },
+    resolve: {
+      seo: () => new Promise<SeoConfig>((resolve) => setTimeout(() => resolve({ title: 'Post', description: 'About', lang: 'de' }), 5)),
+    },
   },
 ];
 
@@ -55,6 +61,12 @@ describe('hydration over real server output', () => {
     destroyPlatform();
 
     const parsed = new DOMParser().parseFromString(html, 'text/html');
+    for (const attr of Array.from(document.documentElement.attributes)) {
+      document.documentElement.removeAttribute(attr.name);
+    }
+    for (const attr of Array.from(parsed.documentElement.attributes)) {
+      document.documentElement.setAttribute(attr.name, attr.value);
+    }
     document.head.innerHTML = parsed.head.innerHTML;
     document.body.innerHTML = parsed.body.innerHTML;
     history.replaceState(null, '', '/post');
@@ -81,6 +93,14 @@ describe('hydration over real server output', () => {
       expect(document.head.querySelectorAll(selector), selector).toHaveLength(1);
     }
     expect(errors.mock.calls.filter((call) => String(call[0]).includes('NG05'))).toEqual([]);
+    expect(document.documentElement.getAttribute('lang')).toBe('de');
+
+    await appRef.injector.get(Router).navigateByUrl('/plain');
+    await appRef.whenStable();
+    appRef.tick();
+    expect(document.title).toBe('Shell');
+    expect(document.documentElement.hasAttribute('lang')).toBe(false);
+    expect(document.head.querySelector('meta[name="author"]')).toBeNull();
     errors.mockRestore();
     appRef.destroy();
     destroyPlatform();

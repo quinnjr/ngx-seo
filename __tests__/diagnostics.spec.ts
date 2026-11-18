@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Component, provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationRef, Component, provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { TestBed } from '@angular/core/testing';
@@ -101,5 +101,15 @@ describe('diagnostics in the Seo service', () => {
     await harness.navigateByUrl('/');
     TestBed.tick();
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('checks the first hydrated page once the browser takes over', async () => {
+    document.head.innerHTML = '<title>Server</title><meta data-seo="meta:name:author" name="author" content="x">';
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideSeo(site)] });
+    TestBed.inject(Seo);
+    TestBed.tick();
+    await TestBed.inject(ApplicationRef).whenStable();
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(warn.mock.calls.some((call: unknown[]) => String(call[0]).includes('title'))).toBe(true);
   });
 });

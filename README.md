@@ -65,8 +65,13 @@ export const appConfig: ApplicationConfig = {
 
 `provideSeo()` also installs a router `TitleStrategy`. A plain route `title`
 then becomes part of that route's SEO layer instead of being written straight
-to `document.title`. When no layer sets a title, the document keeps its
-original `index.html` title.
+to `document.title`. When no layer sets a title, the document gets back its
+original `index.html` title, even after hydration: the server records the
+shell's title and `<html lang/dir>` for the browser.
+
+If your app provides its own `TitleStrategy` after `provideSeo()`, that
+strategy owns route titles: ngx-seo ignores route `title` and never resets
+the document title. It still applies `seo.title` from layers.
 
 ### Move SEO tags out of `index.html`
 
@@ -78,7 +83,9 @@ these left in `index.html` is adopted when a layer provides the same tag and
 removed when none does. Put site-wide values in `defaults` instead.
 
 Everything else in `<head>`, such as `viewport`, stylesheets and your own
-scripts, is never touched.
+scripts, is never touched unless a layer overrides it through `meta` or
+`links`. An `index.html` tag taken over that way (for example `theme-color`)
+gets its original attributes back once no page overrides it.
 
 ## Declaring SEO
 
@@ -198,9 +205,14 @@ Only where the merged config leaves a value unset:
   `summary`.
 - **Site.** `og:site_name` comes from `siteName`, and `og:type` defaults to
   `website`.
-- **Canonical.** The base URL plus the router path, with the fragment and
-  every query parameter not in `keepQueryParams` removed. `og:url` follows
-  it. `canonical: false` emits neither.
+- **Canonical.** The origin, plus the path the app is served under, plus the
+  router path. The fragment and every query parameter not in
+  `keepQueryParams` are removed. `og:url` follows the canonical, and
+  `canonical: false` emits neither.
+  - The serving path comes from `APP_BASE_HREF` or `<base href>` when that
+    is not `/`, otherwise from the path of `baseUrl`. For example,
+    `baseUrl: 'https://x.test/docs/'` gives `https://x.test/docs/<route>`.
+  - Other root-relative URLs, such as images, resolve against the origin.
 - **Absolute URLs.** Every head URL is made absolute. A value that cannot be
   made absolute, or is not `http(s)`, is dropped and reported by
   diagnostics.
@@ -264,7 +276,10 @@ compatible.
 ## Server response
 
 On the server, `http.status` and `http.headers` are written to Angular's
-`RESPONSE_INIT`:
+`RESPONSE_INIT`. A status must be an integer from 200 to 599 that allows an
+HTML body, so not 204, 205 or 304. Any other value is ignored and reported,
+and the server's own status stands. Header names are case-insensitive, so
+`'x-robots-tag': null` removes an inherited `X-Robots-Tag`.
 
 ```ts
 // not-found route
@@ -291,14 +306,19 @@ page asks to override it any more.
   layers are swapped in the same change-detection pass, so the head moves
   straight from one page's complete state to the next.
 - **Errors.** An SEO error never fails a render; it is reported to
-  `ErrorHandler`. Errors are contained as narrowly as possible:
-  - A JSON-LD node that cannot be serialised (for example a cycle) is dropped
-    on its own.
+  `ErrorHandler`, after any signal computation has finished, so a handler may
+  write signals. Errors are contained as narrowly as possible:
+  - A malformed field from an untyped source (a CMS, say) drops only its own
+    group of tags. A single string where a list is expected counts as a
+    one-item list.
+  - A JSON-LD node that cannot be serialised (for example a cycle), or that
+    has no `@type`, is dropped on its own.
   - A throwing title template falls back to the plain title.
   - A throwing contribution or route function is skipped.
   - If the whole page still cannot be resolved, the head falls back to the
     site defaults, never to the previous page's tags.
-  - A DOM failure leaves the current head in place.
+  - A DOM failure affects only the tag it happened on. Every other tag is
+    still applied.
 
 ## Diagnostics
 

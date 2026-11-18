@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Component, ErrorHandler, InjectionToken, inject, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRouteSnapshot, Routes, provideRouter } from '@angular/router';
+import { APP_BASE_HREF } from '@angular/common';
+import { ActivatedRouteSnapshot, RouterStateSnapshot, Routes, TitleStrategy, provideRouter } from '@angular/router';
+import { Injectable } from '@angular/core';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { provideSeo } from '../src/lib/provide-seo';
 import type { SeoConfig, SeoSiteConfig } from '../src/lib/types';
@@ -24,13 +26,25 @@ function jsonLdNodes(): unknown[] {
   return text ? JSON.parse(text)['@graph'] : [];
 }
 
-async function setup(routes: Routes, site: SeoSiteConfig = { baseUrl: 'https://x.test', titleTemplate: '%s | S' }) {
+@Injectable()
+class CustomTitle extends TitleStrategy {
+  override updateTitle(snapshot: RouterStateSnapshot): void {
+    document.title = `Custom ${this.buildTitle(snapshot)}`;
+  }
+}
+
+async function setup(
+  routes: Routes,
+  site: SeoSiteConfig = { baseUrl: 'https://x.test', titleTemplate: '%s | S' },
+  extra: unknown[] = [],
+) {
   const errors = vi.fn();
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
       provideRouter(routes),
       provideSeo(site),
+      ...(extra as never[]),
       { provide: SECTION, useValue: 'Injected' },
       { provide: ErrorHandler, useValue: { handleError: errors } },
     ],
@@ -137,6 +151,29 @@ describe('route SEO layers', () => {
     await go('/section/child');
     expect(document.title).toBe('Child | S');
     expect(meta('author')).toBe('S');
+  });
+
+  it('leaves titles to an app TitleStrategy provided after provideSeo', async () => {
+    const { go } = await setup([{ path: 't', component: Page, title: 'T', data: { seo: { description: 'D' } } }], undefined, [
+      { provide: TitleStrategy, useClass: CustomTitle },
+    ]);
+    await go('/t');
+    expect(document.title).toBe('Custom T');
+    expect(meta('description')).toBe('D');
+  });
+
+  it('includes the app base href in the canonical', async () => {
+    const { go } = await setup([{ path: 'list', component: Page }], { baseUrl: 'https://x.test' }, [
+      { provide: APP_BASE_HREF, useValue: '/blog/' },
+    ]);
+    await go('/list');
+    expect(canonical()).toBe('https://x.test/blog/list');
+  });
+
+  it('includes the baseUrl path in the canonical', async () => {
+    const { go } = await setup([{ path: 'list', component: Page }], { baseUrl: 'https://x.test/docs/' });
+    await go('/list');
+    expect(canonical()).toBe('https://x.test/docs/list');
   });
 
   it('follows the navigated URL for the canonical and drops the query string', async () => {

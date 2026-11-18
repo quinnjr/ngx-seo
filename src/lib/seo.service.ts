@@ -17,13 +17,22 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { isPlatformBrowser, isPlatformServer } from '@angular/common';
-import { NavigationCancel, NavigationEnd, NavigationError, NavigationSkipped, ROUTES, Router } from '@angular/router';
+import { APP_BASE_HREF, isPlatformBrowser, isPlatformServer } from '@angular/common';
+import {
+  NavigationCancel,
+  NavigationEnd,
+  NavigationError,
+  NavigationSkipped,
+  ROUTES,
+  Router,
+  TitleStrategy,
+} from '@angular/router';
 import { diagnose } from './diagnostics';
 import { resolveHead } from './derive';
 import { mergeLayers } from './merge';
 import { HeadReconciler } from './reconciler';
 import { collectRouteLayers } from './route-layers';
+import { SeoTitleStrategy } from './title-strategy';
 import { SEO_SITE_CONFIG } from './tokens';
 import type { ResolvedHead, SeoConfig, SeoContext, SeoHandle, SeoSiteConfig } from './types';
 import { canonicalFor, originOf } from './url';
@@ -73,15 +82,22 @@ export class Seo {
   private readonly site: SeoSiteConfig = inject(SEO_SITE_CONFIG, { optional: true }) ?? {};
   private readonly doc = inject(DOCUMENT);
   private readonly errorHandler = inject(ErrorHandler);
-  private readonly reconciler = new HeadReconciler(this.doc);
   private readonly platformId = inject(PLATFORM_ID);
+  /** Route titles belong to ngx-seo only while its own TitleStrategy is the active one. */
+  private readonly ownsTitles = inject(TitleStrategy, { optional: true }) instanceof SeoTitleStrategy;
+  /** Router is root-provided; only apps that registered routes will navigate. */
+  private readonly routed = inject(ROUTES, { optional: true }) !== null;
+  private readonly reconciler = new HeadReconciler(this.doc, {
+    persistOriginals: isPlatformServer(this.platformId),
+    // With another TitleStrategy driving routes, a missing title is that strategy's to set.
+    restoreTitle: this.ownsTitles || !this.routed,
+  });
+  private readonly basePath = this.resolveBasePath();
   private readonly request = inject(REQUEST, { optional: true });
   private readonly response = isPlatformServer(this.platformId)
     ? new ResponseWriter(inject(RESPONSE_INIT, { optional: true }), (error) => this.report(error))
     : null;
   private readonly router = inject(Router, { optional: true });
-  /** Router is root-provided; only apps that registered routes will navigate. */
-  private readonly routed = inject(ROUTES, { optional: true }) !== null;
   /** False while the browser waits to take over server-rendered tags. */
   private ready = !(isPlatformBrowser(this.platformId) && this.reconciler.hasServerRendered());
 
@@ -89,6 +105,9 @@ export class Seo {
   private readonly path = signal<string>(this.initialPath());
   private readonly contributions = signal<readonly Contribution[]>([]);
   private nextOrder = 0;
+  /** Depth of reactive computation; errors raised inside are delivered after it. */
+  private computing = 0;
+  private pendingErrors: unknown[] = [];
   private lastLayers: readonly SeoConfig[] = [];
   private readonly warned = new Set<string>();
   private readonly diagnostics =
@@ -96,17 +115,22 @@ export class Seo {
 
   /** The fully derived head for the current page. */
   readonly resolved: Signal<ResolvedHead> = computed(() => {
+    this.computing++;
     try {
-      return this.compute();
-    } catch (error) {
-      this.report(error);
-    }
-    // Never keep the previous page's tags: fall back to the site defaults alone.
-    try {
-      return this.computeDefaultsOnly();
-    } catch (error) {
-      this.report(error);
-      return EMPTY_HEAD;
+      try {
+        return this.compute();
+      } catch (error) {
+        this.report(error);
+      }
+      // Never keep the previous page's tags: fall back to the site defaults alone.
+      try {
+        return this.computeDefaultsOnly();
+      } catch (error) {
+        this.report(error);
+        return EMPTY_HEAD;
+      }
+    } finally {
+      this.computing--;
     }
   });
 
@@ -114,6 +138,7 @@ export class Seo {
     effect(() => {
       const head = this.resolved();
       untracked(() => {
+        this.flushErrors();
         if (this.ready) {
           this.reconcile(head);
         }
@@ -185,7 +210,8 @@ export class Seo {
       },
       patch: (partial) => {
         if (alive) {
-          patches.update((current) => ({ ...current, ...partial }));
+          const defined = Object.fromEntries(Object.entries(partial).filter(([, value]) => value !== undefined));
+          patches.update((current) => ({ ...current, ...defined }));
         }
       },
       clear: () => {
@@ -231,7 +257,12 @@ export class Seo {
       await appRef.whenStable();
     } finally {
       this.ready = true;
-      this.reconcile(untracked(this.resolved));
+      const head = untracked(this.resolved);
+      this.flushErrors();
+      this.reconcile(head);
+      if (this.diagnostics && (!this.routed || router?.navigated === true)) {
+        this.warn(head);
+      }
     }
   }
 
@@ -243,9 +274,9 @@ export class Seo {
     const injector = inject(EnvironmentInjector);
     const key = this.site.routeDataKey ?? 'seo';
     const sync = (): void => {
-      this.path.set(router.url);
+      this.path.set(this.withBasePath(router.url));
       this.routeLayers.set(
-        collectRouteLayers(router.routerState.snapshot.root, key, injector, (error) => this.report(error)),
+        collectRouteLayers(router.routerState.snapshot.root, key, injector, (error) => this.report(error), this.ownsTitles),
       );
     };
     const subscription = router.events.subscribe((event) => {
@@ -338,7 +369,56 @@ export class Seo {
     return location ? `${location.pathname}${location.search}` : '/';
   }
 
+  /**
+   * The path the app is served under: the router base href when it is not
+   * the root, otherwise the path of `baseUrl`.
+   */
+  private resolveBasePath(): string {
+    const fromHref = inject(APP_BASE_HREF, { optional: true }) ?? this.doc.querySelector?.('base')?.getAttribute('href') ?? null;
+    const pathOf = (value: string | null | undefined): string => {
+      if (!value) {
+        return '/';
+      }
+      try {
+        return new URL(value, 'http://base.invalid').pathname;
+      } catch {
+        return '/';
+      }
+    };
+    const hrefPath = pathOf(fromHref);
+    return hrefPath !== '/' ? hrefPath : pathOf(this.site.baseUrl);
+  }
+
+  /** Prefixes a router URL (which excludes the base href) with the base path. */
+  private withBasePath(url: string): string {
+    if (this.basePath === '/') {
+      return url;
+    }
+    return `${this.basePath.replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`;
+  }
+
+  /**
+   * Reports an error to the app's ErrorHandler. Errors raised while signals
+   * are being computed are held until the computation is over, so an
+   * ErrorHandler that writes signals works.
+   */
   private report(error: unknown): void {
+    if (this.computing > 0) {
+      this.pendingErrors.push(error);
+      return;
+    }
+    this.deliver(error);
+  }
+
+  private flushErrors(): void {
+    const errors = this.pendingErrors;
+    this.pendingErrors = [];
+    for (const error of errors) {
+      this.deliver(error);
+    }
+  }
+
+  private deliver(error: unknown): void {
     try {
       this.errorHandler.handleError(error);
     } catch {

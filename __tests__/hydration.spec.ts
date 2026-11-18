@@ -53,7 +53,7 @@ describe('hydration', () => {
     expect(authors).toHaveLength(1);
     expect(authors[0].getAttribute('content')).toBe('client');
     expect(document.head.querySelectorAll('meta[name="description"]')).toHaveLength(1);
-    expect(document.title).not.toBe('');
+    expect(document.title).toBe('Server');
   });
 
   it('reconciles immediately when nothing was server-rendered', () => {

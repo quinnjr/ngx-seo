@@ -14,13 +14,14 @@ export function collectRouteLayers(
   key: string,
   injector: Injector,
   onError: (error: unknown) => void,
+  includeTitles = true,
 ): SeoConfig[] {
   const layers: SeoConfig[] = [];
   const seen = new Set<unknown>();
   let snapshot: ActivatedRouteSnapshot | null = root;
   while (snapshot !== null) {
     // Only a title the route declares itself; inherited titles are already counted.
-    if (snapshot.routeConfig?.title !== undefined && typeof snapshot.title === 'string') {
+    if (includeTitles && snapshot.routeConfig?.title !== undefined && typeof snapshot.title === 'string') {
       layers.push({ title: snapshot.title });
     }
     const value: unknown = snapshot.data?.[key];

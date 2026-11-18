@@ -158,16 +158,46 @@ describe('Seo', () => {
     expect(seo.resolved().title).toBe('T');
   });
 
-  it('keeps the previous head when the DOM throws', () => {
+  it('contains a DOM failure to the tags it affects and reports it', () => {
     const { seo, errors } = setup();
     const spy = vi.spyOn(document, 'createElement').mockImplementation(() => {
       throw new Error('dom');
     });
-    seo.contribute({ author: 'A' });
+    seo.contribute({ author: 'A', title: 'New', description: 'Changed' });
     TestBed.tick();
     spy.mockRestore();
     expect(errors).toHaveBeenCalled();
-    expect(meta('description')).toBe('Default');
+    expect(document.title).toBe('New');
+    expect(meta('description')).toBe('Changed');
+    expect(meta('author')).toBeNull();
+  });
+
+  it('treats undefined in a patch as no opinion', () => {
+    const { seo } = setup();
+    const handle = seo.contribute({ title: 'T' });
+    handle.patch({ title: undefined, author: 'A' });
+    TestBed.tick();
+    expect(document.title).toBe('T');
+    expect(meta('author')).toBe('A');
+  });
+
+  it('reports errors to an ErrorHandler that writes signals', () => {
+    const store = signal<unknown>(null);
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideSeo({ baseUrl: 'https://x.test' }),
+        { provide: ErrorHandler, useValue: { handleError: (error: unknown) => store.set(error) } },
+      ],
+    });
+    const seo = TestBed.inject(Seo);
+    seo.contribute(() => {
+      throw new Error('from a computed');
+    });
+    seo.contribute({ author: 'A' });
+    TestBed.tick();
+    expect((store() as Error | null)?.message).toBe('from a computed');
+    expect(meta('author')).toBe('A');
   });
 });
 
