@@ -314,4 +314,28 @@ describe('mergeLayers', () => {
     const merged = mergeLayers([{ openGraph: new Og() as never }, { openGraph: { description: 'x' } }]);
     expect(merged.openGraph).toEqual({ title: 'OG', description: 'x' });
   });
+
+  it('drops a cyclic object field instead of overflowing', () => {
+    const article: Record<string, unknown> = { section: 'News' };
+    article['self'] = article;
+    const robots: Record<string, unknown> = { index: false };
+    robots['loop'] = robots;
+    const merged = mergeLayers([{ title: 'T', openGraph: { article: article as never }, robots: robots as never }]);
+    expect(merged.title).toBe('T');
+    expect(merged.openGraph?.article?.section).toBe('News');
+    expect(merged.robots).toEqual({ index: false });
+  });
+
+  it('keys links by lower-cased rel and alternates by lower-cased hreflang', () => {
+    const merged = mergeLayers([
+      { links: [{ rel: 'canonical', href: '/a' }, { rel: 'alternate', hreflang: 'en-US', href: '/en' }] },
+      { links: [{ rel: 'Canonical', href: '/b' }, { rel: 'alternate', hreflang: 'en-us', href: '/en2' }] },
+    ]);
+    expect(merged.links).toHaveLength(2);
+  });
+
+  it('accepts a single string for Open Graph images', () => {
+    const merged = mergeLayers([{ openGraph: { images: 'https://x.test/a.jpg' as never } }]);
+    expect(merged.openGraph?.images).toEqual([{ url: 'https://x.test/a.jpg' }]);
+  });
 });

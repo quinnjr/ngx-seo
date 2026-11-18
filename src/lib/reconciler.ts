@@ -68,21 +68,21 @@ function matches(el: Element, tag: HeadTag): boolean {
   if (tag.tag === 'meta') {
     for (const attr of ['name', 'property', 'http-equiv']) {
       if (a[attr] !== undefined) {
-        return el.getAttribute(attr) === a[attr];
+        return el.getAttribute(attr)?.toLowerCase() === a[attr].toLowerCase();
       }
     }
     return false;
   }
   if (tag.tag === 'link') {
-    const rel = el.getAttribute('rel');
-    if (rel !== a['rel']) {
+    const rel = el.getAttribute('rel')?.toLowerCase();
+    if (rel !== a['rel']?.toLowerCase()) {
       return false;
     }
     if (a['rel'] === 'canonical') {
       return true;
     }
     if (a['rel'] === 'alternate' && a['hreflang'] !== undefined) {
-      return el.getAttribute('hreflang') === a['hreflang'];
+      return el.getAttribute('hreflang')?.toLowerCase() === a['hreflang'].toLowerCase();
     }
     if (SINGLE_RELS.has((a['rel'] ?? '').toLowerCase())) {
       return el.getAttribute('sizes') === (a['sizes'] ?? null) && el.getAttribute('media') === (a['media'] ?? null);

@@ -101,13 +101,13 @@ class TagList {
 
   name(name: string, content: string | null | undefined): void {
     if (content) {
-      this.add(`meta:name:${name}`, 'meta', { name, content });
+      this.add(`meta:name:${name.toLowerCase()}`, 'meta', { name, content });
     }
   }
 
   property(property: string, content: string | null | undefined): void {
     if (content) {
-      this.add(`meta:property:${property}`, 'meta', { property, content });
+      this.add(`meta:property:${property.toLowerCase()}`, 'meta', { property, content });
     }
   }
 }
@@ -202,6 +202,9 @@ const URL_META = new Set([
   'twitter:image',
   'twitter:image:src',
   'twitter:player',
+  'twitter:player:stream',
+  'twitter:url',
+  'og:see_also',
 ]);
 
 /**
@@ -221,6 +224,20 @@ function refreshContent(content: string, check: (target: string) => string | nul
   }
   const checked = check(target);
   return checked === null ? null : `${delay}; url=${checked}`;
+}
+
+/** Meta names ngx-seo derives itself; a crawler in `bots` may not use them. */
+const OWNED_META_NAMES = new Set(['description', 'keywords', 'author', 'robots', 'viewport']);
+
+/** Script-capable or inline URL schemes, never emitted in any meta content. */
+const UNSAFE_SCHEME = /^\s*(javascript|vbscript|data):/i;
+
+/** Media list items: objects, or bare URLs. */
+function mediaItems<T>(value: unknown): T[] {
+  const list = typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
+  return list
+    .map((item) => (typeof item === 'string' && item !== '' ? { url: item } : item))
+    .filter(isObject) as T[];
 }
 
 function isObject(value: unknown): value is Bag {
@@ -297,12 +314,17 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       for (const [name, v] of Object.entries(source)) {
         if (typeof v === 'string') {
           headers[name] = v;
+        } else if (v !== null && v !== undefined) {
+          onError(new Error(`ngx-seo: ignored response header ${JSON.stringify(name)}: its value is not a string`));
         }
       }
     }
     const out: ResolvedHead['http'] = { headers };
-    if (typeof merged.http?.status === 'number') {
-      out.status = merged.http.status;
+    const status: unknown = merged.http?.status;
+    if (typeof status === 'number') {
+      out.status = status;
+    } else if (status !== null && status !== undefined) {
+      onError(new Error(`ngx-seo: ignored response status ${JSON.stringify(status)}: it is not a number`));
     }
     return out;
   }, { headers: {} });
@@ -328,7 +350,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   const canonical = guarded<string | null>(() => {
     // The last canonical link declared wins, matching the tag that is emitted.
     const canonicalLink = objects<SeoLinkTag>(merged.links)
-      .filter((link) => link.rel === 'canonical' && str(link.href))
+      .filter((link) => str(link.rel)?.toLowerCase() === 'canonical' && str(link.href))
       .pop();
     const fromLink = canonicalLink ? absoluteUrl(canonicalLink.href, origin) : null;
     if (fromLink !== null) {
@@ -372,7 +394,9 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   let robots: string | null = null;
   section(() => {
     list.name('description', description);
-    const keywords = Array.isArray(merged.keywords) ? items<string>(merged.keywords).join(', ') : str(merged.keywords);
+    const keywords = Array.isArray(merged.keywords)
+      ? merged.keywords.filter((word): word is string => typeof word === 'string' && word !== '').join(', ')
+      : str(merged.keywords);
     list.name('keywords', keywords);
     list.name('author', str(merged.author));
     const robotsValue = merged.robots;
@@ -382,6 +406,11 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   section(() => {
     if (isObject(merged.bots)) {
       for (const [bot, directives] of Object.entries(merged.bots)) {
+        const lower = bot.toLowerCase();
+        if (OWNED_META_NAMES.has(lower) || lower.startsWith('twitter:') || lower.startsWith('og:')) {
+          onError(new Error(`ngx-seo: ignored bots.${bot}: that name belongs to another tag`));
+          continue;
+        }
         if (typeof directives === 'string' || isObject(directives)) {
           list.name(bot, robotsContent(directives));
         }
@@ -401,7 +430,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       }
       const href = url(alternate.href, `alternates[${hreflang}]`);
       if (href !== null) {
-        list.add(`link:alternate:${hreflang}`, 'link', { rel: 'alternate', hreflang, href });
+        list.add(`link:alternate:${hreflang.toLowerCase()}`, 'link', { rel: 'alternate', hreflang, href });
       }
     }
   });
@@ -428,7 +457,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     if (shorthand && str(shorthand.url)) {
       sources.push([shorthand, 'image']);
     }
-    objects<SeoImage>(og.images).forEach((image, index) => {
+    mediaItems<SeoImage>(og.images).forEach((image, index) => {
       if (str(image.url)) {
         sources.push([image, `openGraph.images[${index}]`]);
       }
@@ -450,7 +479,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   });
   const media = (value: unknown, prop: 'og:video' | 'og:audio', field: string): void => {
     section(() => {
-      objects<SeoMedia>(value).forEach((item, index) => {
+      mediaItems<SeoMedia>(value).forEach((item, index) => {
         const src = url(item.url, `${field}[${index}]`);
         if (src === null) {
           return;
@@ -522,8 +551,13 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   section(() => {
     objects<SeoMetaTag>(merged.meta).forEach((meta, index) => {
       let content = typeof meta.content === 'string' ? meta.content : undefined;
-      const identity = str(meta.name) ?? str(meta.property);
+      const identity = (str(meta.name) ?? str(meta.property))?.toLowerCase();
       if (content === undefined) {
+        return;
+      }
+      // Never emit a script or data URL, whatever the tag.
+      if (UNSAFE_SCHEME.test(content)) {
+        droppedUrls.push(`meta[${index}]`);
         return;
       }
       if (str(meta.httpEquiv)?.toLowerCase() === 'refresh') {
@@ -540,12 +574,15 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
         }
         content = checked;
       }
-      if (str(meta.name)) {
-        list.override(`meta:name:${meta.name}`, 'meta', { name: meta.name as string, content });
-      } else if (str(meta.property)) {
-        list.override(`meta:property:${meta.property}`, 'meta', { property: meta.property as string, content });
-      } else if (str(meta.httpEquiv)) {
-        list.override(`meta:http-equiv:${meta.httpEquiv}`, 'meta', { 'http-equiv': meta.httpEquiv as string, content });
+      const name = str(meta.name);
+      const property = str(meta.property);
+      const httpEquiv = str(meta.httpEquiv);
+      if (name) {
+        list.override(`meta:name:${name.toLowerCase()}`, 'meta', { name, content });
+      } else if (property) {
+        list.override(`meta:property:${property.toLowerCase()}`, 'meta', { property, content });
+      } else if (httpEquiv) {
+        list.override(`meta:http-equiv:${httpEquiv.toLowerCase()}`, 'meta', { 'http-equiv': httpEquiv, content });
       }
     });
   });
@@ -553,7 +590,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   // Extra links
   section(() => {
     for (const link of objects<SeoLinkTag>(merged.links)) {
-      const rel = str(link.rel);
+      const rel = str(link.rel)?.toLowerCase();
       if (rel === undefined) {
         continue;
       }
@@ -562,17 +599,22 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
         continue;
       }
       const attrs: Record<string, string> = { rel, href };
-      for (const attr of ['hreflang', 'type', 'media', 'sizes', 'title'] as const) {
+      for (const attr of ['hreflang', 'type', 'media', 'sizes', 'title', 'as', 'fetchpriority', 'referrerpolicy', 'color'] as const) {
         const v = str(link[attr]);
         if (v) {
           attrs[attr] = v;
         }
       }
-      let key = link.key ? `link:${link.key}` : `link:${rel}:${href}`;
+      // crossorigin="" is meaningful (anonymous), so an empty string is kept.
+      if (typeof link.crossorigin === 'string') {
+        attrs['crossorigin'] = link.crossorigin;
+      }
+      // User keys live in their own namespace so they can never replace a derived tag.
+      let key = link.key ? `link:key:${link.key}` : `link:${rel}:${href}`;
       if (rel === 'canonical') {
         key = 'link:canonical';
       } else if (rel === 'alternate' && attrs['hreflang']) {
-        key = `link:alternate:${attrs['hreflang']}`;
+        key = `link:alternate:${attrs['hreflang'].toLowerCase()}`;
       }
       if (rel === 'canonical' || key.startsWith('link:alternate:')) {
         list.replace(key, 'link', attrs);

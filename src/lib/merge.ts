@@ -15,8 +15,9 @@ function text(value: unknown): string | undefined {
 /** Lists whose items from every layer are combined, with the function that identifies an item. */
 const KEYED_LISTS: Record<string, KeyFn> = {
   jsonLd: (item) => text(item['@id']),
-  alternates: (item) => text(item['hreflang']),
-  meta: (item) => text(item['key']) ?? text(item['name']) ?? text(item['property']) ?? text(item['httpEquiv']),
+  alternates: (item) => text(item['hreflang'])?.toLowerCase(),
+  meta: (item) =>
+    text(item['key']) ?? (text(item['name']) ?? text(item['property']) ?? text(item['httpEquiv']))?.toLowerCase(),
   links: (item) => text(item['key']) ?? linkKey(item),
   'openGraph.images': (item) => text(item['url']),
 };
@@ -27,12 +28,12 @@ const KEYED_LISTS: Record<string, KeyFn> = {
  * otherwise `<rel>|<href as written>`.
  */
 function linkKey(item: Bag): string {
-  const rel = String(item['rel']);
+  const rel = String(item['rel']).toLowerCase();
   if (rel === 'canonical') {
     return 'canonical';
   }
   if (rel === 'alternate' && text(item['hreflang'])) {
-    return `alternate|${String(item['hreflang'])}`;
+    return `alternate|${String(item['hreflang']).toLowerCase()}`;
   }
   return `${rel}|${String(item['href'])}`;
 }
@@ -117,7 +118,9 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
   const indexOfKey = (list: unknown[], key: string): number =>
     list.findIndex((item) => isPlainObject(item) && keyOf(item) === key);
 
-  for (const item of incoming) {
+  for (const raw of incoming) {
+    // A bare URL is accepted where an image object is expected.
+    const item = path === 'openGraph.images' && typeof raw === 'string' && raw !== '' ? { url: raw } : raw;
     if (isRemoval(item)) {
       const at = indexOfKey(result, item.$remove);
       if (at !== -1) {
@@ -155,7 +158,32 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
   return higherFirst ? [...fresh, ...result] : [...result, ...fresh];
 }
 
-function mergeObject(target: Bag, source: Bag, path: string): void {
+function mergeObject(
+  target: Bag,
+  source: Bag,
+  path: string,
+  ancestors: Set<object>,
+  onError: (error: unknown) => void,
+): void {
+  if (ancestors.has(source)) {
+    onError(new Error(`ngx-seo: dropped a cyclic value at ${path || 'the top level'}`));
+    return;
+  }
+  ancestors.add(source);
+  try {
+    mergeFields(target, source, path, ancestors, onError);
+  } finally {
+    ancestors.delete(source);
+  }
+}
+
+function mergeFields(
+  target: Bag,
+  source: Bag,
+  path: string,
+  ancestors: Set<object>,
+  onError: (error: unknown) => void,
+): void {
   for (const [rawKey, rawValue] of safeEntries(source)) {
     // Header names are case-insensitive, so a null can remove any casing.
     const key = path === 'http.headers' ? rawKey.toLowerCase() : rawKey;
@@ -178,14 +206,19 @@ function mergeObject(target: Bag, source: Bag, path: string): void {
       continue;
     }
     if (Object.hasOwn(KEYED_LISTS, here)) {
-      if (Array.isArray(value)) {
+      const list = typeof value === 'string' ? [value] : value;
+      if (Array.isArray(list)) {
         const existing = Array.isArray(target[key]) ? (target[key] as unknown[]) : [];
-        target[key] = mergeKeyedList(existing, value, here);
+        target[key] = mergeKeyedList(existing, list, here);
       }
       continue;
     }
     if (Array.isArray(value)) {
       target[key] = value.filter((item) => item !== null && item !== undefined && item !== '').map((item) => cloneValue(item));
+      continue;
+    }
+    if (isPlainObject(value) && ancestors.has(value)) {
+      onError(new Error(`ngx-seo: dropped a cyclic value at ${here}`));
       continue;
     }
     if (isPlainObject(value) && !ATOMIC_OBJECTS.has(here)) {
@@ -195,7 +228,7 @@ function mergeObject(target: Bag, source: Bag, path: string): void {
       if (!isPlainObject(existing)) {
         target[key] = base;
       }
-      mergeObject(base, value, here);
+      mergeObject(base, value, here, ancestors, onError);
       continue;
     }
     target[key] = cloneValue(value);
@@ -206,12 +239,12 @@ function mergeObject(target: Bag, source: Bag, path: string): void {
  * Merges layers, lowest priority first, into one config. The result contains
  * no `null`, no empty strings and no removal markers.
  */
-export function mergeLayers(layers: readonly SeoConfig[]): SeoConfig {
+export function mergeLayers(layers: readonly SeoConfig[], onError: (error: unknown) => void = () => {}): SeoConfig {
   const result: Bag = {};
   for (const layer of layers) {
     const plain = asPlain(layer);
     if (isPlainObject(plain)) {
-      mergeObject(result, plain, '');
+      mergeObject(result, plain, '', new Set(), onError);
     }
   }
   return result as SeoConfig;

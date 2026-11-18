@@ -10,6 +10,7 @@ import {
   RouterStateSnapshot,
   Routes,
   TitleStrategy,
+  RouterOutlet,
   provideRouter,
 } from '@angular/router';
 import { injectSeo } from '../src/lib/inject-seo';
@@ -308,6 +309,49 @@ describe('route lifecycle', () => {
     await go('/b');
     spy.mockRestore();
     expect(applied).toEqual(['B title | S']);
+  });
+
+  @Component({ selector: 'seo-shell', imports: [RouterOutlet], template: '<router-outlet /><router-outlet name="side" />' })
+  class Shell {}
+
+  it('never reads routes in a named outlet', async () => {
+    const { go } = await setup([
+      {
+        path: 'page',
+        component: Shell,
+        data: { seo: { title: 'Page' } },
+        children: [{ path: 'popup', outlet: 'side', component: Page, data: { seo: { title: 'POPUP', robots: { index: false } } } }],
+      },
+    ]);
+    await go('/page/(side:popup)');
+    expect(document.title).toBe('Page | S');
+    expect(meta('robots')).toBeNull();
+  });
+
+  it('applies a shared config the route declares itself, even when an ancestor used it too', async () => {
+    const NOINDEX: SeoConfig = { robots: { index: false } };
+    const { go } = await setup([
+      {
+        path: 'a',
+        data: { seo: NOINDEX },
+        children: [
+          {
+            path: 'b',
+            data: { seo: { robots: { index: true } } },
+            children: [{ path: 'c', component: Page, data: { seo: NOINDEX } }],
+          },
+        ],
+      },
+    ]);
+    await go('/a/b/c');
+    expect(meta('robots')).toBe('noindex');
+  });
+
+  it('reports a route seo function that returns a promise', async () => {
+    const { go, errors } = await setup([{ path: 'p', component: Page, data: { seo: async () => ({ title: 'Async' }) } }]);
+    await go('/p');
+    expect(errors).toHaveBeenCalled();
+    expect(String((errors.mock.calls[0][0] as Error).message)).toContain('resolver');
   });
 });
 

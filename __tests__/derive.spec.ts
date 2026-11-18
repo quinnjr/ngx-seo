@@ -223,7 +223,7 @@ describe('resolveHead', () => {
     });
     expect(value(head, 'meta:property:fb:app_id')).toBe('1');
     expect(value(head, 'link:preconnect:https://cdn.test/')).toBe('https://cdn.test/');
-    expect(head.tags.find((t) => t.key === 'link:humans')?.attrs).toEqual({ rel: 'author', href: 'https://x.test/humans.txt' });
+    expect(head.tags.find((t) => t.key === 'link:key:humans')?.attrs).toEqual({ rel: 'author', href: 'https://x.test/humans.txt' });
   });
 
   it('lets an extra meta or link override the derived tag with the same identity', () => {
@@ -456,5 +456,94 @@ describe('resolveHead', () => {
     expect(keys(head).filter((k) => k.startsWith('link:canonical'))).toEqual(['link:canonical']);
     expect(head.canonical).toBe('https://x.test/two');
     expect(value(head, 'meta:property:og:url')).toBe('https://x.test/two');
+  });
+
+  describe('case-insensitive identities', () => {
+    it('treats rel, meta name and hreflang case-insensitively', () => {
+      const head = resolve({
+        description: 'D',
+        alternates: [{ hreflang: 'en-US', href: '/en' }],
+        links: [{ rel: 'Canonical', href: '/other' }, { rel: 'alternate', hreflang: 'en-us', href: '/en2' }],
+        meta: [{ name: 'Description', content: 'Override' }],
+      });
+      const all = (pred: (t: (typeof head.tags)[number]) => boolean): number => head.tags.filter(pred).length;
+      expect(all((t) => t.tag === 'link' && t.attrs['rel']?.toLowerCase() === 'canonical')).toBe(1);
+      expect(head.canonical).toBe('https://x.test/other');
+      expect(all((t) => t.attrs['name']?.toLowerCase() === 'description')).toBe(1);
+      expect(value(head, 'meta:name:description')).toBe('Override');
+      expect(all((t) => t.attrs['hreflang']?.toLowerCase() === 'en-us')).toBe(1);
+    });
+  });
+
+  it('checks URL-valued meta whatever the case, and never emits a script URL in any meta', () => {
+    const head = resolve({
+      meta: [
+        { property: 'OG:IMAGE', content: 'javascript:alert(1)' },
+        { name: 'twitter:url', content: 'javascript:x' },
+        { property: 'og:see_also', content: '/related' },
+        { name: 'custom', content: ' JavaScript:alert(1)' },
+        { name: 'theme-color', content: '#fff' },
+      ],
+    });
+    expect(head.tags.some((t) => /javascript:/i.test(t.attrs['content'] ?? ''))).toBe(false);
+    expect(value(head, 'meta:property:og:see_also')).toBe('https://x.test/related');
+    expect(value(head, 'meta:name:theme-color')).toBe('#fff');
+  });
+
+  it('reports a wrongly typed status or header value', () => {
+    const onError = vi.fn();
+    const head = resolveHead({ http: { status: '404' as never, headers: { 'x-n': 5 as never, 'x-ok': 'y' } } }, site, {
+      path: '/',
+      origin: null,
+      onError,
+    });
+    expect(head.http).toEqual({ headers: { 'x-ok': 'y' } });
+    expect(onError).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps only string keywords', () => {
+    expect(value(resolve({ keywords: [{} as never, 3 as never, 'a', 'b'] }), 'meta:name:keywords')).toBe('a, b');
+  });
+
+  it('keeps user link keys apart from derived keys and ignores bots named like owned tags', () => {
+    const onError = vi.fn();
+    const head = resolveHead(
+      { description: 'D', links: [{ rel: 'preload', href: '/x.js', as: 'script', key: 'canonical' }], bots: { description: 'noindex', googlebot: 'nosnippet' } },
+      site,
+      { path: '/p', origin: null, onError },
+    );
+    expect(value(head, 'link:canonical')).toBe('https://x.test/p');
+    expect(head.tags.filter((t) => t.attrs['rel'] === 'preload')).toHaveLength(1);
+    expect(head.tags.filter((t) => t.attrs['name'] === 'description').map((t) => t.attrs['content'])).toEqual(['D']);
+    expect(value(head, 'meta:name:googlebot')).toBe('nosnippet');
+    expect(onError).toHaveBeenCalled();
+  });
+
+  it('emits preload and preconnect attributes', () => {
+    const head = resolve({
+      links: [
+        { rel: 'preload', href: '/font.woff2', as: 'font', type: 'font/woff2', crossorigin: 'anonymous', fetchpriority: 'high' },
+        { rel: 'preconnect', href: 'https://cdn.test', crossorigin: '' },
+      ],
+    });
+    expect(head.tags.find((t) => t.attrs['rel'] === 'preload')?.attrs).toEqual({
+      rel: 'preload',
+      href: 'https://x.test/font.woff2',
+      as: 'font',
+      type: 'font/woff2',
+      crossorigin: 'anonymous',
+      fetchpriority: 'high',
+    });
+    expect(head.tags.find((t) => t.attrs['rel'] === 'preconnect')?.attrs).toEqual({
+      rel: 'preconnect',
+      href: 'https://cdn.test/',
+      crossorigin: '',
+    });
+  });
+
+  it('accepts single strings for Open Graph videos and audio', () => {
+    const head = resolve({ openGraph: { videos: '/v.mp4' as never, audio: '/a.mp3' as never } });
+    expect(value(head, 'meta:property:og:video')).toBe('https://x.test/v.mp4');
+    expect(value(head, 'meta:property:og:audio')).toBe('https://x.test/a.mp3');
   });
 });

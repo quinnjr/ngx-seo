@@ -114,6 +114,14 @@ export interface SeoLinkTag {
   media?: string;
   sizes?: string;
   title?: string;
+  /** Required by browsers for `rel="preload"`, e.g. `'font'`, `'script'`. */
+  as?: string;
+  /** `''` or `'anonymous'`, or `'use-credentials'`. Needed for font preloads and some preconnects. */
+  crossorigin?: string;
+  fetchpriority?: 'high' | 'low' | 'auto';
+  referrerpolicy?: string;
+  /** For `rel="mask-icon"`. */
+  color?: string;
   /** Identity for merging. Defaults to `rel|href`. */
   key?: string;
 }

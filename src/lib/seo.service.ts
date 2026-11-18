@@ -329,7 +329,7 @@ export class Seo {
     const env = { path: this.path(), origin: this.origin() };
     const all = [this.defaultsLayer(layers, env), ...layers];
     this.lastLayers = all;
-    const merged = mergeLayers(all);
+    const merged = mergeLayers(all, (error) => this.report(error));
     return resolveHead(merged, this.site, { ...env, onError: (error) => this.report(error) });
   }
 
