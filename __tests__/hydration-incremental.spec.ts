@@ -1,5 +1,16 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { Input, Component, Directive, destroyPlatform, input, provideZonelessChangeDetection } from '@angular/core';
+import {
+  Input,
+  Component,
+  DestroyRef,
+  Directive,
+  Injectable,
+  type OnInit,
+  destroyPlatform,
+  inject,
+  input,
+  provideZonelessChangeDetection,
+} from '@angular/core';
 import { getTestBed } from '@angular/core/testing';
 import {
   bootstrapApplication,
@@ -249,6 +260,108 @@ describe('incremental hydration', () => {
       appRef.tick();
     }
     expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('user-chosen');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('carries a route-provided service first injected by a deferred component', async () => {
+    @Injectable()
+    class ProductSeo {
+      readonly seo = injectSeo({ description: 'svc-desc' });
+    }
+    @Component({ selector: 'details-x', template: '<p>details</p>' })
+    class Details {
+      readonly svc = inject(ProductSeo);
+    }
+    @Component({ selector: 'page-g', imports: [Details], template: '<p>page</p> @defer (hydrate on interaction) { <details-x /> }' })
+    class PageG {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { parsed, appRef } = await hydrate(
+      App,
+      [{ path: 'g', component: PageG, providers: [ProductSeo], data: { seo: { title: 'G', description: 'route-desc' } } }],
+      '/g',
+      { baseUrl: 'https://x.test' } as typeof site,
+    );
+    expect(parsed.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('svc-desc');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('svc-desc');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('drops server copies on the first client navigation even while their host stays on the page', async () => {
+    @Component({ selector: 'footer-seo', template: '<p>footer</p>' })
+    class FooterSeo {
+      readonly seo = injectSeo({ author: 'footer' });
+    }
+    @Component({ selector: 'page-n', template: '<p>n</p>' })
+    class PageN {}
+    @Component({
+      selector: 'app-root',
+      imports: [RouterOutlet, FooterSeo],
+      template: '<router-outlet /> @defer (hydrate never) { <footer-seo /> }',
+    })
+    class AppWithFooter {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(
+      AppWithFooter as typeof App,
+      [
+        { path: 'a', component: PageN },
+        { path: 'b', component: PageN },
+      ],
+      '/a',
+      { baseUrl: 'https://x.test' } as typeof site,
+    );
+    expect(document.head.querySelector('meta[name="author"]')?.getAttribute('content')).toBe('footer');
+    await appRef.injector.get(Router).navigateByUrl('/b');
+    await appRef.whenStable();
+    appRef.tick();
+    expect(document.head.querySelector('meta[name="author"]')).toBeNull();
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('stops applying a server copy once its unhydrated host leaves the page', async () => {
+    @Component({ selector: 'gone-seo', template: '<p>gone</p>' })
+    class GoneSeo {
+      readonly seo = injectSeo({ author: 'gone' });
+    }
+    @Component({ selector: 'page-d', imports: [GoneSeo], template: '<p>d</p> @defer (hydrate never) { <gone-seo /> }' })
+    class PageD {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(App, [{ path: 'd', component: PageD }], '/d', { baseUrl: 'https://x.test' } as typeof site);
+    expect(document.head.querySelector('meta[name="author"]')?.getAttribute('content')).toBe('gone');
+    document.querySelector('gone-seo')?.remove();
+    appRef.injector.get(Seo).contribute({ keywords: ['recompute'] });
+    appRef.tick();
+    expect(document.head.querySelector('meta[name="author"]')).toBeNull();
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('ranks contributions after hydrated hosts as the server did', async () => {
+    @Component({ selector: 'host-a', template: '<p>a</p>' })
+    class HostA {
+      readonly seo = injectSeo({ description: 'a' });
+    }
+    @Component({ selector: 'host-b', template: '<p>b</p>' })
+    class HostB implements OnInit {
+      readonly seo = injectSeo({ description: 'b' });
+      private readonly service = inject(Seo);
+      private readonly destroyRef = inject(DestroyRef);
+      ngOnInit(): void {
+        this.service.contribute({ description: 'c' }, { destroyRef: this.destroyRef });
+      }
+    }
+    @Component({ selector: 'page-o', imports: [HostA, HostB], template: '<host-a /><host-b />' })
+    class PageO {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { parsed, appRef } = await hydrate(App, [{ path: 'o', component: PageO }], '/o', { baseUrl: 'https://x.test' } as typeof site);
+    expect(parsed.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('c');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('c');
     errors.mockRestore();
     appRef.destroy();
     destroyPlatform();

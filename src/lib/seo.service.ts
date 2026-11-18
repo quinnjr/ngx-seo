@@ -185,6 +185,8 @@ export class Seo {
   private readonly serverCopies = signal<ReadonlyMap<string, ServerCopy>>(new Map());
   /** Browser only: the server's creation order of every hosted contribution, so both sides rank alike. */
   private serverOrders = new Map<string, number>();
+  /** Contributions made so far per route key, for route-bound copy ids. */
+  private readonly routeSeq = new Map<string, number>();
   /** Browser only: how many contributions each host has claimed so far. */
   private readonly hostClaims = new WeakMap<Element, number>();
   /** Browser only: the highest server order, reserved until takeover. */
@@ -320,12 +322,21 @@ export class Seo {
       }
       return { ...base, ...patches() };
     });
+    // The root ActivatedRoute is replaced on every navigation when routes are
+    // never reused, but the root is always attached: treat it as no route.
+    const route = options.route ?? null;
+    const isRoot = route !== null && 'parent' in route && route.parent === null;
+    const boundRoute = isRoot ? null : route;
+
+    // A contribution travels from server to browser under a copy id: its host
+    // element's, or, without a host, its route's (route-provided services).
     let hostId: string | null = null;
     let order: number | null = null;
     const host = options.host ?? null;
-    if (host !== null) {
-      try {
-        if (isPlatformServer(this.platformId)) {
+    const server = isPlatformServer(this.platformId);
+    try {
+      if (host !== null) {
+        if (server) {
           // Several contributions can share a host (host directives, two injectSeo calls): list them all.
           hostId = String(this.nextHostId++);
           const existing = host.getAttribute(SEO_HOST_ATTR);
@@ -336,33 +347,38 @@ export class Seo {
           const index = this.hostClaims.get(host) ?? 0;
           this.hostClaims.set(host, index + 1);
           hostId = ids[index] ?? null;
-          const claimed = hostId;
-          const serverOrder = claimed === null ? undefined : this.serverOrders.get(claimed);
-          if (serverOrder !== undefined) {
-            order = serverOrder;
-            this.nextOrder = Math.max(this.nextOrder, serverOrder + 1);
-          }
-          if (claimed !== null && untracked(this.serverCopies).has(claimed)) {
-            // The component has hydrated: its own contribution replaces the server copy.
-            this.serverCopies.update((copies) => {
-              const next = new Map(copies);
-              next.delete(claimed);
-              return next;
-            });
-          }
         }
-      } catch (error) {
-        this.report(error);
+      } else if (boundRoute !== null) {
+        const key = this.routeKey(boundRoute);
+        if (key !== null) {
+          const seq = this.routeSeq.get(key) ?? 0;
+          this.routeSeq.set(key, seq + 1);
+          hostId = `r:${key}#${seq}`;
+        }
       }
+      if (!server && hostId !== null) {
+        const claimed = hostId;
+        const serverOrder = this.serverOrders.get(claimed);
+        if (serverOrder !== undefined) {
+          order = serverOrder;
+          this.nextOrder = Math.max(this.nextOrder, serverOrder + 1);
+        }
+        if (untracked(this.serverCopies).has(claimed)) {
+          // The contributor exists in the browser now: its own contribution replaces the server copy.
+          this.serverCopies.update((copies) => {
+            const next = new Map(copies);
+            next.delete(claimed);
+            return next;
+          });
+        }
+      }
+    } catch (error) {
+      this.report(error);
     }
 
-    // The root ActivatedRoute is replaced on every navigation when routes are
-    // never reused, but the root is always attached: treat it as no route.
-    const route = options.route ?? null;
-    const isRoot = route !== null && 'parent' in route && route.parent === null;
     const contribution: Contribution = {
       hostId,
-      route: isRoot ? null : route,
+      route: boundRoute,
       priority: options.priority ?? 0,
       order: order ?? this.nextOrder++,
       value,
@@ -511,7 +527,7 @@ export class Seo {
       .map((item) => ({ priority: item.priority, order: item.order, value: item.value }));
     // Server copies stand in for components that have not hydrated, while their host is still in the page.
     const copies = [...this.serverCopies().values()]
-      .filter((copy) => this.doc.querySelector?.(`[${SEO_HOST_ATTR}~="${copy.id}"]`) != null)
+      .filter((copy) => this.copyStillApplies(copy.id, attached))
       .map((copy) => ({ priority: copy.priority, order: copy.order, value: () => copy.config }));
     // Hosted contributions keep the server's creation order, so copies and live ones rank as on the server.
     const contributions = [...copies, ...live]
@@ -580,6 +596,60 @@ export class Seo {
         console.warn(`[ngx-seo] ${message} (${path})`);
       }
     }
+  }
+
+  /**
+   * A stable key for a route config: its index path in the router config
+   * (children and lazily loaded routes included), the same on server and browser.
+   */
+  private routeKey(route: ActivatedRoute | Route): string | null {
+    const config = 'snapshot' in route ? route.snapshot?.routeConfig : route;
+    if (!config || this.router === null) {
+      return null;
+    }
+    type Loaded = Route & { _loadedRoutes?: Route[] };
+    const search = (routes: readonly Route[] | undefined, prefix: string): string | null => {
+      for (const [index, candidate] of (routes ?? []).entries()) {
+        const here = `${prefix}${index}`;
+        if (candidate === config) {
+          return here;
+        }
+        const found =
+          search(candidate.children, `${here}.`) ?? search((candidate as Loaded)._loadedRoutes, `${here}~`);
+        if (found !== null) {
+          return found;
+        }
+      }
+      return null;
+    };
+    return search(this.router.config, '');
+  }
+
+  /** The route config at a key from `routeKey`. */
+  private routeAt(key: string): Route | null {
+    let routes: readonly Route[] | undefined = this.router?.config;
+    let found: Route | null = null;
+    for (const part of key.split(/(?=[.~])/)) {
+      const lazy = part.startsWith('~');
+      const index = Number(part.replace(/^[.~]/, ''));
+      const list: readonly Route[] | undefined = lazy ? (found as (Route & { _loadedRoutes?: Route[] }) | null)?._loadedRoutes : found === null ? routes : found.children;
+      found = list?.[index] ?? null;
+      if (found === null) {
+        return null;
+      }
+      routes = undefined;
+    }
+    return found;
+  }
+
+  /** Whether a server copy still stands in: its host is still in the page, or its route is still attached. */
+  private copyStillApplies(id: string, attached: ReadonlySet<ActivatedRoute | Route> | null): boolean {
+    const routeMatch = /^r:(.+)#\d+$/.exec(id);
+    if (routeMatch !== null) {
+      const config = this.routeAt(routeMatch[1]);
+      return config !== null && (attached === null || attached.has(config));
+    }
+    return this.doc.querySelector?.(`[${SEO_HOST_ATTR}~="${id}"]`) != null;
   }
 
   /** Server only: records component contributions for the browser to use until they hydrate. */

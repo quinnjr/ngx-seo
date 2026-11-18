@@ -170,8 +170,20 @@ export class FaqSectionComponent {
 | `clear()` | Empty it, keeping the handle. |
 | `destroy()` | Remove it. Later calls do nothing. |
 
-Outside an injection context, use the service:
-`inject(Seo).contribute(config, { priority, destroyRef, route })`.
+Outside an injection context, use the service. In a component, pass its
+route and host element so the contribution behaves like `injectSeo`,
+including across hydration:
+
+```ts
+private readonly seo = inject(Seo);
+private readonly destroyRef = inject(DestroyRef);
+private readonly route = inject(ActivatedRoute);
+private readonly host = inject(ElementRef).nativeElement as Element;
+
+ngOnInit(): void {
+  this.seo.contribute({ description: this.summary() }, { destroyRef: this.destroyRef, route: this.route, host: this.host });
+}
+```
 
 A contribution from `injectSeo` belongs to a route and applies only while
 that route is attached. It stops when you navigate away and starts again
@@ -350,13 +362,20 @@ page asks to override it any more.
   until the initial navigation has finished. It takes over at the first of
   three things: the app becoming stable, one second passing (an app with a
   recurring timer may never be stable), or the next navigation.
-  - **Incremental hydration.** The server records each component's
-    contribution (in `TransferState`, linked by a `data-seo-c` attribute on
-    the component host). In the browser, a component inside a
-    `@defer (hydrate …)` block that has not hydrated yet keeps contributing
-    the server's copy. Once it hydrates, its own contribution takes over. All
-    copies are dropped on the first client navigation. Only JSON-safe values
-    travel, so a function such as a per-layer `titleTemplate` does not.
+  - **Incremental hydration.** The server records contributions in
+    `TransferState`, so the browser can use them until their owner exists:
+    - **Recorded:** component contributions (linked by a `data-seo-c`
+      attribute on the component host), and contributions from a route's
+      services (linked by the route).
+    - **Before the owner hydrates:** a component inside `@defer (hydrate …)`
+      keeps contributing the server's copy, ranked in the server's order.
+    - **After:** once it hydrates, its own contribution takes over.
+    - **When copies are dropped:** on the first client navigation, or when
+      their host leaves the page or their route is detached.
+    - **Not recorded:** contributions with neither a host nor a route (a
+      root service, or `contribute()` without `host`/`route`).
+    - **Only JSON-safe values travel,** so a function such as a per-layer
+      `titleTemplate` does not.
 - **Navigation.** In the browser the head is applied after each render pass.
   By then every component created while rendering has contributed, and its
   inputs are bound. The head therefore moves straight from one page's
