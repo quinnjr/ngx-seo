@@ -13,18 +13,20 @@ import {
   computed,
   effect,
   inject,
+  isDevMode,
   signal,
   untracked,
 } from '@angular/core';
 import { isPlatformBrowser, isPlatformServer } from '@angular/common';
 import { NavigationCancel, NavigationEnd, NavigationError, NavigationSkipped, ROUTES, Router } from '@angular/router';
+import { diagnose } from './diagnostics';
 import { resolveHead } from './derive';
 import { mergeLayers } from './merge';
 import { HeadReconciler } from './reconciler';
 import { collectRouteLayers } from './route-layers';
 import { SEO_SITE_CONFIG } from './tokens';
 import type { ResolvedHead, SeoConfig, SeoContext, SeoHandle, SeoSiteConfig } from './types';
-import { originOf } from './url';
+import { canonicalFor, originOf } from './url';
 import { ResponseWriter } from './response';
 
 export interface ContributeOptions {
@@ -79,6 +81,10 @@ export class Seo {
   private readonly contributions = signal<readonly Contribution[]>([]);
   private nextOrder = 0;
   private lastGood: ResolvedHead = EMPTY_HEAD;
+  private lastLayers: readonly SeoConfig[] = [];
+  private readonly warned = new Set<string>();
+  private readonly diagnostics =
+    isDevMode() && isPlatformBrowser(this.platformId) && (this.site.diagnostics ?? 'warn') === 'warn';
 
   /** The fully derived head for the current page. */
   readonly resolved: Signal<ResolvedHead> = computed(() => {
@@ -97,6 +103,9 @@ export class Seo {
         this.response?.write(head.http);
         if (this.ready) {
           this.reconcile(head);
+        }
+        if (this.diagnostics) {
+          this.warn(head);
         }
       });
     });
@@ -238,7 +247,9 @@ export class Seo {
       ...contributions,
     ];
     const env = { path: this.path(), origin: this.origin() };
-    const merged = mergeLayers([this.defaultsLayer(layers, env), ...layers]);
+    const all = [this.defaultsLayer(layers, env), ...layers];
+    this.lastLayers = all;
+    const merged = mergeLayers(all);
     return resolveHead(merged, this.site, { ...env, onError: (error) => this.report(error) });
   }
 
@@ -260,6 +271,21 @@ export class Seo {
     } catch (error) {
       this.report(error);
       return {};
+    }
+  }
+
+  private warn(head: ResolvedHead): void {
+    const path = untracked(this.path);
+    const current = canonicalFor(path, originOf(this.site.baseUrl ?? null) ?? this.origin(), {
+      trailingSlash: this.site.canonical?.trailingSlash ?? 'preserve',
+      keepQueryParams: this.site.canonical?.keepQueryParams ?? [],
+    });
+    for (const message of diagnose(head, this.lastLayers, current)) {
+      const id = `${path.split('?')[0]}\n${message}`;
+      if (!this.warned.has(id)) {
+        this.warned.add(id);
+        console.warn(`[ngx-seo] ${message} (${path})`);
+      }
     }
   }
 
