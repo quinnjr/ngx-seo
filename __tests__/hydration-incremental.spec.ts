@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { Input, Component, destroyPlatform, input, provideZonelessChangeDetection } from '@angular/core';
+import { Input, Component, Directive, destroyPlatform, input, provideZonelessChangeDetection } from '@angular/core';
 import { getTestBed } from '@angular/core/testing';
 import {
   bootstrapApplication,
@@ -12,6 +12,7 @@ import { Router, RouterOutlet, provideRouter, type Routes } from '@angular/route
 import { faqPage, type FaqItem } from '../src/lib/builders';
 import { injectSeo } from '../src/lib/inject-seo';
 import { provideSeo } from '../src/lib/provide-seo';
+import { Seo } from '../src/lib/seo.service';
 
 @Component({ selector: 'app-root', imports: [RouterOutlet], template: '<router-outlet />' })
 class App {}
@@ -203,6 +204,51 @@ describe('incremental hydration', () => {
     const graph = document.head.querySelector('script[type="application/ld+json"]')?.textContent ?? '';
     expect(graph.match(/FAQPage/g)).toHaveLength(1);
     expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('faq-desc');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('keeps every contribution on one host, such as a host directive', async () => {
+    @Directive({ selector: '[seoKeywords]' })
+    class SeoKeywords {
+      readonly seo = injectSeo({ keywords: ['k1'], jsonLd: [{ '@type': 'Thing', '@id': '#dir' }] });
+    }
+    @Component({ selector: 'deferred-x', hostDirectives: [SeoKeywords], template: '<p>x</p>' })
+    class DeferredX {
+      readonly seo = injectSeo({ description: 'deferred-desc' });
+    }
+    @Component({ selector: 'page-host', imports: [DeferredX], template: '<p>page</p> @defer (hydrate on interaction) { <deferred-x /> }' })
+    class PageHost {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(App, [{ path: 'h', component: PageHost }], '/h', { baseUrl: 'https://x.test' } as typeof site);
+    expect(document.head.querySelector('meta[name="keywords"]')?.getAttribute('content')).toBe('k1');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('deferred-desc');
+    expect(document.head.querySelector('script[type="application/ld+json"]')?.textContent).toContain('#dir');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('ranks a contribution made after hydration above every server contribution', async () => {
+    @Component({ selector: 'deferred-y', template: '<p>y</p>' })
+    class DeferredY {
+      readonly seo = injectSeo({ description: 'deferred-desc' });
+    }
+    @Component({ selector: 'page-y', imports: [DeferredY], template: '<p>page</p> @defer (hydrate on timer(100ms)) { <deferred-y /> }' })
+    class PageY {
+      readonly seo = injectSeo({ title: 'Y' });
+    }
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(App, [{ path: 'y', component: PageY }], '/y', { baseUrl: 'https://x.test' } as typeof site);
+    appRef.injector.get(Seo).contribute({ description: 'user-chosen' });
+    appRef.tick();
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('user-chosen');
+    for (let i = 0; i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      appRef.tick();
+    }
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('user-chosen');
     errors.mockRestore();
     appRef.destroy();
     destroyPlatform();

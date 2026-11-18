@@ -185,6 +185,10 @@ export class Seo {
   private readonly serverCopies = signal<ReadonlyMap<string, ServerCopy>>(new Map());
   /** Browser only: the server's creation order of every hosted contribution, so both sides rank alike. */
   private serverOrders = new Map<string, number>();
+  /** Browser only: how many contributions each host has claimed so far. */
+  private readonly hostClaims = new WeakMap<Element, number>();
+  /** Browser only: the highest server order, reserved until takeover. */
+  private maxServerOrder = -1;
   /** Depth of reactive computation; errors raised inside are delivered after it. */
   private computing = 0;
   private pendingErrors: unknown[] = [];
@@ -264,6 +268,7 @@ export class Seo {
       this.transferState.remove(SERVER_COPIES);
       if (Array.isArray(copies)) {
         this.serverOrders = new Map(copies.map((copy) => [copy.id, copy.order]));
+        this.maxServerOrder = Math.max(-1, ...copies.map((copy) => copy.order));
         this.serverCopies.set(new Map(copies.map((copy) => [copy.id, copy])));
       }
       void this.takeOverAfterHydration();
@@ -321,10 +326,16 @@ export class Seo {
     if (host !== null) {
       try {
         if (isPlatformServer(this.platformId)) {
+          // Several contributions can share a host (host directives, two injectSeo calls): list them all.
           hostId = String(this.nextHostId++);
-          host.setAttribute(SEO_HOST_ATTR, hostId);
+          const existing = host.getAttribute(SEO_HOST_ATTR);
+          host.setAttribute(SEO_HOST_ATTR, existing ? `${existing} ${hostId}` : hostId);
         } else {
-          hostId = host.getAttribute(SEO_HOST_ATTR);
+          // The n-th contribution on a host claims the n-th server id, as created in the same order.
+          const ids = (host.getAttribute(SEO_HOST_ATTR) ?? '').split(/\s+/).filter((id) => id !== '');
+          const index = this.hostClaims.get(host) ?? 0;
+          this.hostClaims.set(host, index + 1);
+          hostId = ids[index] ?? null;
           const claimed = hostId;
           const serverOrder = claimed === null ? undefined : this.serverOrders.get(claimed);
           if (serverOrder !== undefined) {
@@ -430,6 +441,9 @@ export class Seo {
       });
       cleanup();
     } finally {
+      // Anything contributed from now on ranks above every server contribution,
+      // including deferred ones that hydrate later and keep their server order.
+      this.nextOrder = Math.max(this.nextOrder, this.maxServerOrder + 1);
       this.ready = true;
       const head = untracked(this.resolved);
       this.flushErrors();
@@ -497,7 +511,7 @@ export class Seo {
       .map((item) => ({ priority: item.priority, order: item.order, value: item.value }));
     // Server copies stand in for components that have not hydrated, while their host is still in the page.
     const copies = [...this.serverCopies().values()]
-      .filter((copy) => this.doc.querySelector?.(`[${SEO_HOST_ATTR}="${copy.id}"]`) != null)
+      .filter((copy) => this.doc.querySelector?.(`[${SEO_HOST_ATTR}~="${copy.id}"]`) != null)
       .map((copy) => ({ priority: copy.priority, order: copy.order, value: () => copy.config }));
     // Hosted contributions keep the server's creation order, so copies and live ones rank as on the server.
     const contributions = [...copies, ...live]

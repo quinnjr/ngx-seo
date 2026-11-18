@@ -176,6 +176,7 @@ Outside an injection context, use the service:
 A contribution from `injectSeo` belongs to a route and applies only while
 that route is attached. It stops when you navigate away and starts again
 when you come back.
+
 - **In a component,** that is the component's own route. This covers pages
   kept alive by a `RouteReuseStrategy`.
 - **In a service from a route's `providers`** (or a lazy route's injector),
@@ -183,6 +184,7 @@ when you come back.
   this is what stops them leaking onto other pages.
 - **In a root service,** the contribution applies everywhere until it is
   destroyed.
+
 `inject(Seo).resolved` is a signal of the fully derived head, useful for
 tests or a preview panel.
 
