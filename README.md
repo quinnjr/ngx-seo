@@ -13,8 +13,10 @@ duplicates after hydration and nothing stale after a client navigation.
   `tslib`, which every ng-packagr-built Angular library uses.
 - Peer dependencies: `@angular/core`, `@angular/common` and
   `@angular/router`, all `^21.0.0`.
-- Works with Trusted Types enforced: JSON-LD is written as a text node, not
-  through a script sink.
+- Works with Trusted Types enforced. Where `trustedTypes` exists, JSON-LD is
+  written through a policy named `ngx-seo#jsonld`; add it to your CSP
+  `trusted-types` directive. If the policy is refused, JSON-LD is written as a
+  text node instead. That still works, but the browser reports a violation.
 
 ## Install
 
@@ -163,7 +165,7 @@ export class FaqSectionComponent {
 
 | Method | Effect |
 |---|---|
-| `set(config)` | Replace this contribution. |
+| `set(config)` | Replace this contribution; a function makes it reactive. |
 | `patch(partial)` | Merge top-level fields into it. |
 | `clear()` | Empty it, keeping the handle. |
 | `destroy()` | Remove it. Later calls do nothing. |
@@ -346,9 +348,15 @@ page asks to override it any more.
   until the initial navigation has finished. It takes over at the first of
   three things: the app becoming stable, one second passing (an app with a
   recurring timer may never be stable), or the next navigation.
-- **Navigation.** The outgoing page's contributions and the new route's
-  layers are swapped in the same change-detection pass, so the head moves
-  straight from one page's complete state to the next.
+  - **Incremental hydration.** Tags the server rendered stay until the first
+    client navigation, even if no client layer provides them yet. This
+    covers SEO from components inside `@defer (hydrate …)` blocks that have
+    not hydrated.
+- **Navigation.** In the browser the head is applied after each render pass.
+  By then every component created while rendering has contributed, and its
+  inputs are bound. The head therefore moves straight from one page's
+  complete state to the next. A contribution that reads a required input
+  before it is bound waits for it; this is not reported as an error.
 - **Errors.** An SEO error never fails a render; it is reported to
   `ErrorHandler`, after any signal computation has finished, so a handler may
   write signals. Errors are contained as narrowly as possible:

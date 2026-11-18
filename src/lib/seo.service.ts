@@ -76,6 +76,18 @@ export const SEO_TAKEOVER_TIMEOUT = new InjectionToken<number>('SEO_TAKEOVER_TIM
   factory: () => 1000,
 });
 
+/** The value of a contribution that is waiting for a required input. */
+const NOT_READY: SeoConfig = Object.freeze({});
+
+/** True for Angular's "required input has no value yet" error (NG0950). */
+function isInputNotReady(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') {
+    return false;
+  }
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return code === -950 || (typeof message === 'string' && message.includes('NG0950'));
+}
+
 /** The missing-baseUrl warning is printed once per server process, not per request. */
 let warnedMissingBaseUrl = false;
 
@@ -134,6 +146,14 @@ export class Seo {
   /** Routes currently attached to the router state; null when no router is tracked. */
   private readonly attached = signal<ReadonlySet<ActivatedRoute | Route> | null>(null);
   private nextOrder = 0;
+  /** Bumped to re-evaluate contributions that were waiting for a required input. */
+  private readonly retry = signal(0);
+  private retries = 0;
+  private reconcileScheduled = false;
+  /** Set while computing when a contribution is waiting for a required input. */
+  private notReady = false;
+  /** NavigationEnd events seen; the second is the first client navigation. */
+  private navigations = 0;
   /** Depth of reactive computation; errors raised inside are delivered after it. */
   private computing = 0;
   private pendingErrors: unknown[] = [];
@@ -144,6 +164,7 @@ export class Seo {
 
   /** The fully derived head for the current page. */
   readonly resolved: Signal<ResolvedHead> = computed(() => {
+    this.notReady = false;
     this.computing++;
     try {
       try {
@@ -168,8 +189,20 @@ export class Seo {
       const head = this.resolved();
       untracked(() => {
         this.flushErrors();
+        if (this.notReady) {
+          this.retryNotReady();
+        } else {
+          this.retries = 0;
+        }
         if (this.ready) {
-          this.reconcile(head);
+          if (isPlatformBrowser(this.platformId)) {
+            // Apply after the render pass: components created while rendering (children,
+            // @if blocks) and inputs bound in it are then included, so the page goes
+            // straight from one complete head to the next.
+            this.scheduleReconcile();
+          } else {
+            this.reconcile(head);
+          }
         }
         this.writeResponse(head);
         if (this.diagnostics && this.ready && (!this.routed || this.router?.navigated === true)) {
@@ -195,6 +228,8 @@ export class Seo {
       );
     }
     if (!this.ready) {
+      // Tags from @defer (hydrate …) blocks stay until the first client navigation.
+      this.reconciler.holdServerOnlyTags(true);
       void this.takeOverAfterHydration();
     }
   }
@@ -224,12 +259,20 @@ export class Seo {
     const patches = signal<SeoConfig>({});
     const value = computed<SeoConfig>(() => {
       const current = source();
+      if (typeof current === 'function') {
+        this.retry();
+      }
       let base: SeoConfig = {};
       if (typeof current === 'function') {
         try {
           base = current() ?? {};
         } catch (error) {
-          this.report(error);
+          if (isInputNotReady(error)) {
+            // A required input is bound later in this render pass: not an error, just not ready.
+            return NOT_READY;
+          } else {
+            this.report(error);
+          }
         }
       } else {
         base = current;
@@ -364,6 +407,11 @@ export class Seo {
     };
     const subscription = router.events.subscribe((event) => {
       if (event instanceof NavigationEnd) {
+        this.navigations++;
+        if (this.navigations === 2) {
+          // The first client navigation: server-only tags may go now.
+          this.reconciler.holdServerOnlyTags(false);
+        }
         sync();
       }
     });
@@ -380,7 +428,14 @@ export class Seo {
     const contributions = this.contributions()
       .filter((item) => item.route === null || attached === null || attached.has(item.route))
       .sort((a, b) => a.priority - b.priority || a.order - b.order)
-      .map((item) => item.value());
+      .map((item) => item.value())
+      .filter((config) => {
+        if (config === NOT_READY) {
+          this.notReady = true;
+          return false;
+        }
+        return true;
+      });
     const layers: SeoConfig[] = [...this.routeLayers(), ...contributions];
     const env = { path: this.path(), origin: this.origin(), basePath: this.basePath };
     const all = [this.defaultsLayer(layers, env), ...layers];
@@ -437,6 +492,31 @@ export class Seo {
         console.warn(`[ngx-seo] ${message} (${path})`);
       }
     }
+  }
+
+  private scheduleReconcile(): void {
+    if (this.reconcileScheduled) {
+      return;
+    }
+    this.reconcileScheduled = true;
+    afterNextRender(
+      () => {
+        this.reconcileScheduled = false;
+        const head = untracked(this.resolved);
+        this.flushErrors();
+        this.reconcile(head);
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /** Re-evaluates waiting contributions once the current render pass has bound inputs. */
+  private retryNotReady(): void {
+    if (this.retries >= 3) {
+      return;
+    }
+    this.retries++;
+    queueMicrotask(() => this.retry.update((n) => n + 1));
   }
 
   private writeResponse(head: ResolvedHead): void {

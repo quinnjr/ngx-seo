@@ -18,11 +18,46 @@ function elementsOf(parent: Element): Element[] {
   return out;
 }
 
+/** Name of the Trusted Types policy ngx-seo uses for JSON-LD; list it in your `trusted-types` CSP directive. */
+export const SEO_TRUSTED_TYPES_POLICY = 'ngx-seo#jsonld';
+
+interface ScriptPolicy {
+  createScript(text: string): unknown;
+}
+
+let policyCache: ScriptPolicy | null | undefined;
+
+/** The JSON-LD Trusted Types policy, or null where Trusted Types are unavailable or the policy is refused. */
+function trustedTypesPolicy(): ScriptPolicy | null {
+  if (policyCache === undefined) {
+    const factory = (globalThis as { trustedTypes?: { createPolicy?: (name: string, rules: object) => ScriptPolicy } })
+      .trustedTypes;
+    try {
+      // The text is JSON already escaped for a script element, so it passes through unchanged.
+      policyCache = factory?.createPolicy?.(SEO_TRUSTED_TYPES_POLICY, { createScript: (text: string) => text }) ?? null;
+    } catch {
+      policyCache = null;
+    }
+  }
+  return policyCache;
+}
+
+/** @internal Clears the cached policy between tests. */
+export function resetTrustedTypesPolicyForTests(): void {
+  policyCache = undefined;
+}
+
 /**
  * Replaces an element's text through a text node. Assigning `textContent` on a
  * `<script>` is a Trusted Types sink and throws when Trusted Types are enforced.
  */
 function setText(el: Element, text: string): void {
+  const policy = tagName(el) === 'script' ? trustedTypesPolicy() : null;
+  if (policy !== null) {
+    // A TrustedScript avoids a Trusted Types violation report on every write.
+    (el as HTMLScriptElement).text = policy.createScript(text) as unknown as string;
+    return;
+  }
   while (el.firstChild) {
     el.removeChild(el.firstChild);
   }
@@ -145,6 +180,10 @@ export class HeadReconciler {
   /** The title the document shell had before ngx-seo touched it. */
   private readonly originalTitle: string;
   private readonly restoreTitle: boolean;
+  /** Keys of tags the server rendered. */
+  private readonly serverKeys = new Set<string>();
+  /** While true, server-rendered tags no layer provides yet are kept (incremental hydration). */
+  private holdServerTags = false;
 
   constructor(
     private readonly doc: Document,
@@ -176,6 +215,18 @@ export class HeadReconciler {
       }
     }
     this.serverRendered = this.managed.size > 0;
+    for (const key of this.managed.keys()) {
+      this.serverKeys.add(key);
+    }
+  }
+
+  /**
+   * Keeps server-rendered tags that no layer provides yet, for example those
+   * from a `@defer (hydrate …)` block that has not hydrated. Released on the
+   * first client navigation.
+   */
+  holdServerOnlyTags(hold: boolean): void {
+    this.holdServerTags = hold;
   }
 
   private get head(): HTMLHeadElement | null {
@@ -223,6 +274,9 @@ export class HeadReconciler {
     // Release managed elements that are no longer wanted.
     for (const [key, el] of [...this.managed]) {
       if (!wanted.has(key)) {
+        if (this.holdServerTags && this.serverKeys.has(key)) {
+          continue;
+        }
         this.managed.delete(key);
         attempt(() => this.release(el));
       }

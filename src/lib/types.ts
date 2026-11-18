@@ -223,8 +223,8 @@ export interface ResolvedHead {
 }
 
 export interface SeoHandle {
-  /** Replace this contribution's config. */
-  set(config: SeoConfig): void;
+  /** Replace this contribution's config; pass a function to make it reactive. */
+  set(config: SeoConfig | (() => SeoConfig)): void;
   /** Merge fields into this contribution's config. */
   patch(partial: SeoConfig): void;
   /** Empty this contribution without removing it. */

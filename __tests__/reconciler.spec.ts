@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { HeadReconciler, SEO_ATTR } from '../src/lib/reconciler';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { HeadReconciler, SEO_ATTR, resetTrustedTypesPolicyForTests } from '../src/lib/reconciler';
 import type { HeadTag, ResolvedHead } from '../src/lib/types';
 
 function makeDoc(head = '', htmlAttrs = ''): Document {
@@ -321,6 +321,27 @@ describe('HeadReconciler under Trusted Types', () => {
       expect(doc.head.querySelector('script[type="application/ld+json"]')?.textContent).toBe('{"page":"B"}');
     } finally {
       delete (HTMLScriptElement.prototype as unknown as Record<string, unknown>)['textContent'];
+    }
+  });
+});
+
+describe('HeadReconciler Trusted Types policy', () => {
+  it('writes JSON-LD through a named Trusted Types policy when available', () => {
+    const createScript = vi.fn((text: string) => ({ toString: () => text }));
+    const createPolicy = vi.fn(() => ({ createScript }));
+    resetTrustedTypesPolicyForTests();
+    (globalThis as Record<string, unknown>)['trustedTypes'] = { createPolicy };
+    try {
+      const doc = makeDoc();
+      const reconciler = new HeadReconciler(doc);
+      reconciler.apply(headOf([jsonLd('{"a":1}')]));
+      reconciler.apply(headOf([jsonLd('{"a":2}')]));
+      expect(createPolicy).toHaveBeenCalledWith('ngx-seo#jsonld', expect.anything());
+      expect(createScript).toHaveBeenCalledWith('{"a":2}');
+      expect(doc.head.querySelector('script[type="application/ld+json"]')?.textContent).toBe('{"a":2}');
+    } finally {
+      delete (globalThis as Record<string, unknown>)['trustedTypes'];
+      resetTrustedTypesPolicyForTests();
     }
   });
 });

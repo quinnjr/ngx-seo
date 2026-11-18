@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Component, ErrorHandler, InjectionToken, inject, provideZonelessChangeDetection } from '@angular/core';
+import { Input, Component, ErrorHandler, InjectionToken, inject, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { APP_BASE_HREF } from '@angular/common';
 import {
@@ -16,7 +16,8 @@ import {
 } from '@angular/router';
 import { injectSeo } from '../src/lib/inject-seo';
 import { HeadReconciler } from '../src/lib/reconciler';
-import { Injectable, NgModule } from '@angular/core';
+import { ApplicationRef, Injectable, NgModule, input } from '@angular/core';
+import { faqPage } from '../src/lib/builders';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { provideSeo } from '../src/lib/provide-seo';
 import type { SeoConfig, SeoSiteConfig } from '../src/lib/types';
@@ -459,6 +460,35 @@ describe('route lifecycle', () => {
     await go('/page/(side:popup)');
     expect(document.title).toBe('Page | S');
     expect(meta('robots')).toBeNull();
+  });
+
+  it('waits for a contribution whose required input is not bound yet, without reporting it', async () => {
+    @Component({ selector: 'seo-faq', template: '' })
+    class Faq {
+      // JIT cannot see signal inputs without metadata; AOT builds do not need this.
+      @Input({ isSignal: true, alias: 'items', required: true } as never)
+      readonly items = input.required<{ question: string; answer: string }[]>();
+      readonly seo = injectSeo(() => ({ jsonLd: [faqPage(this.items())] }));
+    }
+    @Component({ selector: 'seo-faq-page', imports: [Faq], template: '<seo-faq [items]="items" />' })
+    class FaqPageCmp {
+      readonly items = [{ question: 'Q', answer: 'A' }];
+    }
+    const applied: boolean[] = [];
+    const original = HeadReconciler.prototype.apply;
+    const spy = vi.spyOn(HeadReconciler.prototype, 'apply').mockImplementation(function (this: HeadReconciler, head) {
+      applied.push(head.tags.some((t) => (t.text ?? '').includes('FAQPage')));
+      return original.call(this, head);
+    });
+    const { go, errors } = await setup([{ path: 'faq', component: FaqPageCmp }]);
+    applied.length = 0;
+    await go('/faq');
+    await TestBed.inject(ApplicationRef).whenStable();
+    TestBed.tick();
+    spy.mockRestore();
+    expect(errors).not.toHaveBeenCalled();
+    expect(applied.length).toBeGreaterThan(0);
+    expect(applied.every(Boolean)).toBe(true);
   });
 });
 
