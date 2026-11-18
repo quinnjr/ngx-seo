@@ -409,5 +409,41 @@ describe('route lifecycle', () => {
       expect(document.title, url).toBe('Home | S');
     }
   });
+
+  it('keeps a root service contribution when routes are never reused', async () => {
+    @Injectable({ providedIn: 'root' })
+    class SiteSeo {
+      readonly seo = injectSeo({ author: 'site-wide' });
+    }
+    class NeverReuse extends BaseRouteReuseStrategy {
+      override shouldReuseRoute(): boolean {
+        return false;
+      }
+    }
+    const { go } = await setup(
+      [
+        { path: 'a', component: Page },
+        { path: 'b', component: Page },
+      ],
+      undefined,
+      [{ provide: RouteReuseStrategy, useClass: NeverReuse }],
+    );
+    await go('/a');
+    TestBed.inject(SiteSeo);
+    TestBed.tick();
+    expect(meta('author')).toBe('site-wide');
+    await go('/b');
+    expect(meta('author')).toBe('site-wide');
+  });
+
+  it('does not warn about a missing title while an app TitleStrategy owns titles', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { go } = await setup([{ path: 't', component: Page, title: 'T', data: { seo: { description: 'D' } } }], undefined, [
+      { provide: TitleStrategy, useClass: CustomTitle },
+    ]);
+    await go('/t');
+    expect(warn.mock.calls.filter((call) => String(call[0]).includes('title'))).toEqual([]);
+    warn.mockRestore();
+  });
 });
 

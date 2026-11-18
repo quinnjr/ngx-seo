@@ -281,3 +281,25 @@ describe('HeadReconciler link adoption', () => {
   });
 });
 
+describe('HeadReconciler meta media', () => {
+  it('takes over only the theme-color with the same media', () => {
+    const doc = makeDoc(
+      '<meta name="theme-color" media="(prefers-color-scheme: light)" content="#fff">' +
+        '<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000">',
+    );
+    new HeadReconciler(doc).apply(
+      headOf([
+        {
+          key: 'meta:name:theme-color|(prefers-color-scheme: dark)',
+          tag: 'meta',
+          attrs: { name: 'theme-color', content: '#111', media: '(prefers-color-scheme: dark)' },
+        },
+      ]),
+    );
+    const all = Array.from(doc.head.querySelectorAll('meta[name="theme-color"]')).map((el) => [el.getAttribute('media'), el.getAttribute('content')]);
+    expect(all).toContainEqual(['(prefers-color-scheme: light)', '#fff']);
+    expect(all).toContainEqual(['(prefers-color-scheme: dark)', '#111']);
+    expect(all).toHaveLength(2);
+  });
+});
+

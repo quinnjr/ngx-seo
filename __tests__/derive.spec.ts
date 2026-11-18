@@ -370,7 +370,7 @@ describe('resolveHead', () => {
     });
 
     it('ignores list fields that are not lists', () => {
-      const head = loose({ title: 'T', openGraph: { videos: { url: '/v.mp4' }, audio: 'x' }, alternates: 'fr', meta: {}, links: 1, jsonLd: {} });
+      const head = loose({ title: 'T', openGraph: { videos: 5, audio: true }, alternates: 'fr', meta: {}, links: 1, jsonLd: {} });
       expect(head.title).toBe('T');
       expect(keys(head).some((k) => k.includes('og:video'))).toBe(false);
     });
@@ -577,5 +577,25 @@ describe('resolveHead', () => {
     });
     expect(head.title).toBeNull();
     expect(onError).toHaveBeenCalledTimes(4);
+  });
+
+  it('accepts a single object for Open Graph video and audio, and reports other shapes', () => {
+    const onError = vi.fn();
+    const head = resolveHead({ openGraph: { videos: { url: '/v.mp4' } as never, audio: 5 as never } }, site, { path: '/', origin: null, onError });
+    expect(value(head, 'meta:property:og:video')).toBe('https://x.test/v.mp4');
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits theme-color media and keys each variant separately', () => {
+    const head = resolve({
+      meta: [
+        { name: 'theme-color', content: '#fff', media: '(prefers-color-scheme: light)' },
+        { name: 'theme-color', content: '#000', media: '(prefers-color-scheme: dark)' },
+      ],
+    });
+    expect(head.tags.filter((t) => t.attrs['name'] === 'theme-color').map((t) => t.attrs)).toEqual([
+      { name: 'theme-color', content: '#fff', media: '(prefers-color-scheme: light)' },
+      { name: 'theme-color', content: '#000', media: '(prefers-color-scheme: dark)' },
+    ]);
   });
 });

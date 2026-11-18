@@ -68,7 +68,8 @@ function matches(el: Element, tag: HeadTag): boolean {
   if (tag.tag === 'meta') {
     for (const attr of ['name', 'property', 'http-equiv']) {
       if (a[attr] !== undefined) {
-        return el.getAttribute(attr)?.toLowerCase() === a[attr].toLowerCase();
+        // Variants that differ only by media (light/dark theme-color) are different tags.
+        return el.getAttribute(attr)?.toLowerCase() === a[attr].toLowerCase() && el.getAttribute('media') === (a['media'] ?? null);
       }
     }
     return false;

@@ -16,8 +16,7 @@ function text(value: unknown): string | undefined {
 const KEYED_LISTS: Record<string, KeyFn> = {
   jsonLd: (item) => text(item['@id']),
   alternates: (item) => text(item['hreflang'])?.toLowerCase(),
-  meta: (item) =>
-    text(item['key']) ?? (text(item['name']) ?? text(item['property']) ?? text(item['httpEquiv']))?.toLowerCase(),
+  meta: (item) => text(item['key']) ?? metaIdentity(item),
   links: (item) => text(item['key']) ?? linkKey(item),
   'openGraph.images': (item) => text(item['url']),
 };
@@ -36,6 +35,16 @@ function linkKey(item: Bag): string {
     return `alternate|${String(item['hreflang']).toLowerCase()}`;
   }
   return `${rel}|${String(item['href'])}`;
+}
+
+/**
+ * A meta tag's identity without an explicit `key`: its name, property or
+ * http-equiv, plus `|<media>` when it has a media query (theme-color variants).
+ */
+function metaIdentity(item: Bag): string | undefined {
+  const identity = (text(item['name']) ?? text(item['property']) ?? text(item['httpEquiv']))?.toLowerCase();
+  const media = text(item['media']);
+  return identity === undefined ? undefined : media === undefined ? identity : `${identity}|${media}`;
 }
 
 /** Keyed lists where higher layers come first. */
@@ -123,15 +132,29 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
     : (a: string | undefined, b: string): boolean => a === b;
   const indexOfKey = (list: unknown[], key: string): number =>
     list.findIndex((item) => isPlainObject(item) && same(keyOf(item), key));
+  /** Removes every item with this key; returns where the first one was, or -1. */
+  const removeAll = (list: unknown[], key: string): number => {
+    let first = -1;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const item = list[i];
+      if (isPlainObject(item) && same(keyOf(item), key)) {
+        list.splice(i, 1);
+        first = i;
+      }
+    }
+    return first;
+  };
+  // Repeated meta (video:tag, article:tag, …) without an explicit key: a layer's
+  // items with one identity form a group, all kept, replacing lower groups.
+  const groupedMeta = path === 'meta';
+  /** Where the next item of a claimed group goes in `result`; -1 means append to `fresh`. */
+  const groupSlots = new Map<string, number>();
 
   for (const raw of incoming) {
     // A bare URL is accepted where an image object is expected.
     const item = path === 'openGraph.images' && typeof raw === 'string' && raw !== '' ? { url: raw } : raw;
     if (isRemoval(item)) {
-      const at = indexOfKey(result, item.$remove);
-      if (at !== -1) {
-        result.splice(at, 1);
-      }
+      removeAll(result, item.$remove);
       continue;
     }
     if (item === null || typeof item !== 'object' || Array.isArray(item)) {
@@ -143,6 +166,21 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
     const key = keyOf(plain);
     if (key === undefined) {
       fresh.push(copy);
+      continue;
+    }
+    if (groupedMeta && text(plain['key']) === undefined) {
+      const group = key.toLowerCase();
+      if (!groupSlots.has(group)) {
+        // The group replaces the lower one in place, keeping its position.
+        groupSlots.set(group, removeAll(result, key));
+      }
+      const slot = groupSlots.get(group) as number;
+      if (slot === -1) {
+        fresh.push(copy);
+      } else {
+        result.splice(slot, 0, copy);
+        groupSlots.set(group, slot + 1);
+      }
       continue;
     }
     const inFresh = indexOfKey(fresh, key);
@@ -291,7 +329,10 @@ function isSet(value: unknown): boolean {
 function releaseClaimedExtras(result: Bag, layer: Bag): void {
   const claims: string[] = [];
   for (const [field, metas] of Object.entries(FIELD_META)) {
-    if (isSet(layer[field])) {
+    const value = layer[field];
+    // An image without a URL has no opinion, so it claims nothing.
+    const imageWithoutUrl = field === 'image' && isPlainObject(value) && !text(value['url']);
+    if (isSet(value) && !imageWithoutUrl) {
       claims.push(...metas);
     }
   }

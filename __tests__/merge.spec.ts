@@ -376,4 +376,32 @@ describe('mergeLayers', () => {
     expect(merged.jsonLd).toEqual([{ '@type': 'Article', headline: 'H' }]);
     expect(onError).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps repeated meta with the same identity within a layer, and a higher layer replaces the group', () => {
+    const one = mergeLayers([{ meta: [{ property: 'video:tag', content: 'one' }, { property: 'video:tag', content: 'two' }] }]);
+    expect(one.meta?.map((m) => ('content' in m ? m.content : ''))).toEqual(['one', 'two']);
+    const two = mergeLayers([
+      { meta: [{ property: 'video:tag', content: 'one' }, { property: 'video:tag', content: 'two' }, { name: 'x', content: 'kept' }] },
+      { meta: [{ property: 'video:tag', content: 'three' }] },
+    ]);
+    expect(two.meta?.map((m) => ('content' in m ? m.content : ''))).toEqual(['three', 'kept']);
+    const removed = mergeLayers([{ meta: [{ property: 'video:tag', content: 'one' }, { property: 'video:tag', content: 'two' }] }, { meta: [removeItem('video:tag')] }]);
+    expect(removed.meta).toEqual([]);
+  });
+
+  it('treats theme-color variants with different media as different tags', () => {
+    const merged = mergeLayers([
+      { meta: [{ name: 'theme-color', content: '#fff', media: '(prefers-color-scheme: light)' }, { name: 'theme-color', content: '#000', media: '(prefers-color-scheme: dark)' }] },
+      { meta: [{ name: 'theme-color', content: '#111', media: '(prefers-color-scheme: dark)' }] },
+    ]);
+    expect(merged.meta).toEqual([
+      { name: 'theme-color', content: '#fff', media: '(prefers-color-scheme: light)' },
+      { name: 'theme-color', content: '#111', media: '(prefers-color-scheme: dark)' },
+    ]);
+  });
+
+  it('does not let an image without a URL claim lower image tags', () => {
+    const merged = mergeLayers([{ meta: [{ property: 'og:image', content: '/site.png' }] }, { image: { url: '' } }]);
+    expect(merged.meta).toEqual([{ property: 'og:image', content: '/site.png' }]);
+  });
 });

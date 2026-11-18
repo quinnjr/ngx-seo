@@ -223,8 +223,12 @@ export class Seo {
       }
       return { ...base, ...patches() };
     });
+    // The root ActivatedRoute is replaced on every navigation when routes are
+    // never reused, but the root is always attached: treat it as no route.
+    const route = options.route ?? null;
+    const isRoot = route !== null && 'parent' in route && route.parent === null;
     const contribution: Contribution = {
-      route: options.route ?? null,
+      route: isRoot ? null : route,
       priority: options.priority ?? 0,
       order: this.nextOrder++,
       value,

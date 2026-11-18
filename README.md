@@ -216,7 +216,7 @@ Item keys, as written in your config (before URLs are made absolute):
 |---|---|
 | `jsonLd` | the node's `@id` |
 | `alternates` | `hreflang` |
-| `meta` | `key`, else `name`, `property` or `httpEquiv` |
+| `meta` | `key`, else `name`, `property` or `httpEquiv`, plus `\|<media>` when it has `media`; `removeItem` removes every item with the key |
 | `links` | `key`, else `canonical` for the canonical link, `alternate\|<hreflang>` for a language alternate, otherwise `<rel>\|<href>` |
 | `openGraph.images` | `url` |
 
@@ -274,7 +274,7 @@ All fields are optional.
 | `openGraph` | `title`, `description`, `type`, `url`, `siteName`, `locale`, `alternateLocales`, `images`, `videos`, `audio`, `article`, `profile`, `book`. |
 | `twitter` | `card`, `site`, `creator`, `title`, `description`, `image`, `imageAlt`. |
 | `jsonLd` | `JsonLdNode[]`. |
-| `meta` | Extra `{ name \| property \| httpEquiv, content, key? }[]`. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it within the same layer. A higher layer that sets the field itself (`description`, `robots`, `openGraph.title`, …) wins over lower extra tags, so site-wide values moved from `index.html` into `defaults.meta` never override a page. Repeated properties (`video:tag`, `music:song`, …) are all kept. |
+| `meta` | Extra `{ name \| property \| httpEquiv, content, media?, key? }[]`. `media` is part of the identity, so light and dark `theme-color` variants are separate tags. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it within the same layer. A higher layer that sets the field itself (`description`, `robots`, `openGraph.title`, …) wins over lower extra tags, so site-wide values moved from `index.html` into `defaults.meta` never override a page. Repeated properties (`video:tag`, `music:song`, …) are all kept: a layer's items with the same identity form a group that replaces a lower layer's group. |
 | `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, as?, crossorigin?, fetchpriority?, referrerpolicy?, color?, key? }[]`. A `canonical` or `alternate`+`hreflang` link replaces the derived one; a custom `key` never does. `rel`, meta names and `hreflang` are compared case-insensitively. |
 | `http` | `{ status, headers }`, applied to the server response. |
 

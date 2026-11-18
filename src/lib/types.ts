@@ -98,6 +98,8 @@ export interface SeoAlternate {
 
 interface SeoMetaBase {
   content: string;
+  /** Media query, e.g. for light and dark `theme-color` variants. Part of the tag's identity. */
+  media?: string;
   /** Identity for merging. Defaults to the name / property / httpEquiv value. */
   key?: string;
 }

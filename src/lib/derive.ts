@@ -236,9 +236,9 @@ const OWNED_META_NAMES = new Set(['description', 'keywords', 'author', 'robots',
 /** Script-capable or inline URL schemes, never emitted in any meta content. */
 const UNSAFE_SCHEME = /^\s*(javascript|vbscript|data):/i;
 
-/** Media list items: objects, or bare URLs. */
+/** Media list items: a list of objects or bare URLs, or a single object or URL. */
 function mediaItems<T>(value: unknown): T[] {
-  const list = typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
+  const list = typeof value === 'string' || isObject(value) ? [value] : Array.isArray(value) ? value : [];
   return list
     .map((item) => (typeof item === 'string' && item !== '' ? { url: item } : item))
     .filter(isObject) as T[];
@@ -494,6 +494,10 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   });
   const media = (value: unknown, prop: 'og:video' | 'og:audio', field: string): void => {
     section(() => {
+      if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'object') {
+        onError(new Error(`ngx-seo: ignored ${field}: expected a list`));
+        return;
+      }
       mediaItems<SeoMedia>(value).forEach((item, index) => {
         const src = url(item.url, `${field}[${index}]`);
         if (src === null) {
@@ -592,12 +596,16 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       const name = str(meta.name);
       const property = str(meta.property);
       const httpEquiv = str(meta.httpEquiv);
+      const media = str(meta.media);
+      const suffix = media === undefined ? '' : `|${media}`;
+      const withMedia = (attrs: Record<string, string>): Record<string, string> =>
+        media === undefined ? attrs : { ...attrs, media };
       if (name) {
-        list.override(`meta:name:${name.toLowerCase()}`, 'meta', { name, content });
+        list.override(`meta:name:${name.toLowerCase()}${suffix}`, 'meta', withMedia({ name, content }));
       } else if (property) {
-        list.override(`meta:property:${property.toLowerCase()}`, 'meta', { property, content });
+        list.override(`meta:property:${property.toLowerCase()}${suffix}`, 'meta', withMedia({ property, content }));
       } else if (httpEquiv) {
-        list.override(`meta:http-equiv:${httpEquiv.toLowerCase()}`, 'meta', { 'http-equiv': httpEquiv, content });
+        list.override(`meta:http-equiv:${httpEquiv.toLowerCase()}${suffix}`, 'meta', withMedia({ 'http-equiv': httpEquiv, content }));
       }
     });
   });
