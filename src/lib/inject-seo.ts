@@ -13,6 +13,12 @@ import type { SeoConfig, SeoHandle } from './types';
 export interface InjectSeoOptions {
   /** Higher wins. Ties resolve by creation order. Default 0. */
   priority?: number;
+  /**
+   * A stable identity for a contribution from a route's service, the same on
+   * server and browser. Only needed for incremental hydration when one route
+   * has several service contributions whose configs differ between the two.
+   */
+  key?: string;
 }
 
 type InternalRoute = Route & { _injector?: unknown; _loadedInjector?: unknown; _loadedRoutes?: Route[] };
@@ -64,6 +70,7 @@ export function injectSeo(config: SeoConfig | (() => SeoConfig), options: Inject
       ) ?? inject(ActivatedRoute, { optional: true }));
   return seo.contribute(config, {
     priority: options.priority,
+    key: options.key,
     destroyRef: inject(DestroyRef),
     route,
     // Duck-typed: `instanceof` fails across realms (iframes, test DOMs).

@@ -367,6 +367,11 @@ page asks to override it any more.
     - **Recorded:** component contributions (linked by a `data-seo-c`
       attribute on the component host), and contributions from a route's
       services (linked by the route).
+    - **Several services on one route:** they may be created in a different
+      order in the browser, so a service continues a server copy only when
+      the match is certain: the route has one copy, or one copy has the same
+      config. If a service's config can differ between server and browser,
+      give it a stable identity: `injectSeo(config, { key: 'product' })`.
     - **Before the owner hydrates:** a component inside `@defer (hydrate …)`
       keeps contributing the server's copy, ranked in the server's order.
     - **After:** once it hydrates, its own contribution takes over.

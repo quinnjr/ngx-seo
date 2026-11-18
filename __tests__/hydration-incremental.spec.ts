@@ -366,5 +366,43 @@ describe('incremental hydration', () => {
     appRef.destroy();
     destroyPlatform();
   });
+
+  it('gives each of several route services its own server copy', async () => {
+    @Injectable()
+    class SvcA {
+      readonly seo = injectSeo({ description: 'a-desc' });
+    }
+    @Injectable()
+    class SvcB {
+      readonly seo = injectSeo({ keywords: ['b'] });
+    }
+    @Component({ selector: 'details-a', template: '<p>a</p>' })
+    class DetailsA {
+      readonly svc = inject(SvcA);
+    }
+    @Component({ selector: 'eager-b', template: '<p>b</p>' })
+    class EagerB {
+      readonly svc = inject(SvcB);
+    }
+    @Component({
+      selector: 'page-two',
+      imports: [DetailsA, EagerB],
+      template: '@defer (hydrate on interaction) { <details-a /> } @defer (hydrate on immediate) { <eager-b /> }',
+    })
+    class PageTwo {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { parsed, appRef } = await hydrate(
+      App,
+      [{ path: 'g', component: PageTwo, providers: [SvcA, SvcB], data: { seo: { title: 'G', description: 'route-desc' } } }],
+      '/g',
+      { baseUrl: 'https://x.test' } as typeof site,
+    );
+    expect(parsed.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
+    expect(document.head.querySelector('meta[name="keywords"]')?.getAttribute('content')).toBe('b');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
 });
 

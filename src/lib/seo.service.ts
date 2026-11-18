@@ -64,6 +64,12 @@ export interface ContributeOptions {
    * of its SEO stands in for it. `injectSeo` sets this for you.
    */
   host?: Element | null;
+  /**
+   * A stable identity for a contribution from a route's services, the same
+   * on server and browser. Only needed when one route has several such
+   * contributions whose configs differ between server and browser.
+   */
+  key?: string;
 }
 
 /** Host attribute linking a server-rendered component to its server SEO copy. */
@@ -351,9 +357,15 @@ export class Seo {
       } else if (boundRoute !== null) {
         const key = this.routeKey(boundRoute);
         if (key !== null) {
-          const seq = this.routeSeq.get(key) ?? 0;
-          this.routeSeq.set(key, seq + 1);
-          hostId = `r:${key}#${seq}`;
+          if (options.key !== undefined) {
+            hostId = `r:${key}#k:${options.key}`;
+          } else if (server) {
+            const seq = this.routeSeq.get(key) ?? 0;
+            this.routeSeq.set(key, seq + 1);
+            hostId = `r:${key}#${seq}`;
+          } else {
+            hostId = this.claimRouteCopy(key, config);
+          }
         }
       }
       if (!server && hostId !== null) {
@@ -623,6 +635,32 @@ export class Seo {
       return null;
     };
     return search(this.router.config, '');
+  }
+
+  /**
+   * Browser only: which server copy a route-service contribution continues.
+   * Services may be created in a different order than on the server, so a
+   * copy is matched only when that is unambiguous: the route has a single
+   * copy, or exactly one unclaimed copy has the same config.
+   */
+  private claimRouteCopy(routeKey: string, config: SeoConfig | (() => SeoConfig)): string | null {
+    const prefix = `r:${routeKey}#`;
+    const recorded = [...this.serverOrders.keys()].filter((id) => id.startsWith(prefix) && !id.startsWith(`${prefix}k:`));
+    if (recorded.length === 1) {
+      return recorded[0];
+    }
+    let value: string;
+    try {
+      value = JSON.stringify(typeof config === 'function' ? untracked(config) : config);
+    } catch {
+      return null;
+    }
+    const copies = untracked(this.serverCopies);
+    const matches = recorded.filter((id) => {
+      const copy = copies.get(id);
+      return copy !== undefined && JSON.stringify(copy.config) === value;
+    });
+    return matches.length === 1 ? matches[0] : null;
   }
 
   /** The route config at a key from `routeKey`. */
