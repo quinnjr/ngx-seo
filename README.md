@@ -119,7 +119,12 @@ That is the whole declaration. The document title, canonical, `og:*`,
   ```
 
   They run in the application's root injector, so services from a route's own
-  `providers` are not available. Use a resolver when you need those.
+  `providers` are not available. They must return the config synchronously:
+  a promise or observable is reported and ignored. Use a resolver for either
+  case.
+- **Shared values.** A config object or function a route declares itself is
+  always applied, even if an ancestor uses the same object. Only a value
+  Angular copies down from the parent route is counted once.
 - **Primary outlet only.** Only routes on the primary outlet chain are read.
   Named outlets do not contribute SEO data.
 - **Resolvers** write into route data, so `resolve: { seo: postSeoResolver }`
@@ -233,9 +238,13 @@ Only where the merged config leaves a value unset:
     is not `/`, otherwise from the path of `baseUrl`. For example,
     `baseUrl: 'https://x.test/docs/'` gives `https://x.test/docs/<route>`.
   - Other root-relative URLs, such as images, resolve against the origin.
-- **Absolute URLs.** Every head URL is made absolute. A value that cannot be
-  made absolute, or is not `http(s)`, is dropped and reported by
-  diagnostics.
+- **Absolute URLs.** Every head URL is made absolute. This covers derived
+  tags, `links`, refresh targets, and extra `meta` whose name or property
+  holds a URL (`og:url`, `og:image*`, `og:video*`, `og:audio*`,
+  `og:see_also`, `twitter:image`, `twitter:url`, `twitter:player*`, matched
+  case-insensitively). A value that cannot be made absolute, or is not
+  `http(s)`, is dropped and reported by diagnostics. No `meta` content
+  starting with `javascript:`, `vbscript:` or `data:` is ever emitted.
 
 ## SeoConfig reference
 
@@ -249,14 +258,14 @@ All fields are optional.
 | `lang`, `dir` | Set on `<html>`; restored when no layer sets them. |
 | `canonical` | URL, or `false`. |
 | `robots` | `{ index, follow, noarchive, nosnippet, noimageindex, notranslate, maxSnippet, maxImagePreview, maxVideoPreview, unavailableAfter }` or a raw string. |
-| `bots` | Per-crawler robots, e.g. `{ googlebot: { maxSnippet: 120 } }`. |
+| `bots` | Per-crawler robots, e.g. `{ googlebot: { maxSnippet: 120 } }`. Names ngx-seo owns (`description`, `keywords`, `author`, `robots`, `viewport`, `twitter:*`, `og:*`) are rejected and reported. |
 | `alternates` | `{ hreflang, href }[]`. |
 | `image` | URL or `{ url, alt, width, height, type }`. |
 | `openGraph` | `title`, `description`, `type`, `url`, `siteName`, `locale`, `alternateLocales`, `images`, `videos`, `audio`, `article`, `profile`, `book`. |
 | `twitter` | `card`, `site`, `creator`, `title`, `description`, `image`, `imageAlt`. |
 | `jsonLd` | `JsonLdNode[]`. |
 | `meta` | Extra `{ name \| property \| httpEquiv, content, key? }[]`. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it. |
-| `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, key? }[]`. A `canonical` or `alternate`+`hreflang` link replaces the derived one. |
+| `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, as?, crossorigin?, fetchpriority?, referrerpolicy?, color?, key? }[]`. A `canonical` or `alternate`+`hreflang` link replaces the derived one; a custom `key` never does. `rel`, meta names and `hreflang` are compared case-insensitively. |
 | `http` | `{ status, headers }`, applied to the server response. |
 
 ## Structured data (JSON-LD)
@@ -329,8 +338,10 @@ page asks to override it any more.
   `ErrorHandler`, after any signal computation has finished, so a handler may
   write signals. Errors are contained as narrowly as possible:
   - A malformed field from an untyped source (a CMS, say) drops only its own
-    group of tags. A single string where a list is expected counts as a
-    one-item list.
+    group of tags, and wrongly typed values are reported. A cyclic object
+    is dropped where the cycle starts. A single string where a list is
+    expected counts as a one-item list; for images, video and audio, a bare
+    URL is accepted.
   - A JSON-LD node that cannot be serialised (for example a cycle), or that
     has no `@type`, is dropped on its own.
   - A throwing title template falls back to the plain title.
