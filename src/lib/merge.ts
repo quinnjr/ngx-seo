@@ -303,9 +303,29 @@ const OG_META: Record<string, string[]> = {
   images: ['og:image*'],
   videos: ['og:video*'],
   audio: ['og:audio*'],
-  article: ['article:*'],
-  profile: ['profile:*'],
-  book: ['book:*'],
+};
+/** Per-subfield claims: a subfield claims only the tag it produces. */
+const OG_NESTED_META: Record<string, Record<string, string[]>> = {
+  article: {
+    publishedTime: ['article:published_time'],
+    modifiedTime: ['article:modified_time'],
+    expirationTime: ['article:expiration_time'],
+    authors: ['article:author'],
+    section: ['article:section'],
+    tags: ['article:tag'],
+  },
+  profile: {
+    firstName: ['profile:first_name'],
+    lastName: ['profile:last_name'],
+    username: ['profile:username'],
+    gender: ['profile:gender'],
+  },
+  book: {
+    authors: ['book:author'],
+    isbn: ['book:isbn'],
+    releaseDate: ['book:release_date'],
+    tags: ['book:tag'],
+  },
 };
 const TWITTER_META: Record<string, string[]> = {
   card: ['twitter:card'],
@@ -342,6 +362,19 @@ function releaseClaimedExtras(result: Bag, layer: Bag): void {
       for (const [field, metas] of Object.entries(table)) {
         if (isSet(value[field])) {
           claims.push(...metas);
+        }
+      }
+    }
+  }
+  const openGraph = layer['openGraph'];
+  if (isPlainObject(openGraph)) {
+    for (const [object, table] of Object.entries(OG_NESTED_META)) {
+      const nested = openGraph[object];
+      if (isPlainObject(nested)) {
+        for (const [field, metas] of Object.entries(table)) {
+          if (isSet(nested[field])) {
+            claims.push(...metas);
+          }
         }
       }
     }

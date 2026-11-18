@@ -91,16 +91,39 @@ class TagList {
    * tag replaces it in place instead of producing a duplicate.
    */
   override(baseKey: string, tag: HeadTag['tag'], attrs: Record<string, string>): void {
-    const existing = this.tags.find((item) => item.key === baseKey);
-    // Only a derived tag is replaced; further extra tags with this identity are all kept.
-    if (existing !== undefined && !this.overridden.has(baseKey)) {
+    const inGroup = (key: string): boolean => key === baseKey || key.startsWith(`${baseKey}#`);
+    if (!this.overridden.has(baseKey)) {
       this.overridden.add(baseKey);
-      existing.tag = tag;
-      existing.attrs = attrs;
+      // The first extra tag replaces every derived repeat with this identity, in place.
+      const first = this.tags.findIndex((item) => inGroup(item.key));
+      if (first !== -1) {
+        for (let i = this.tags.length - 1; i > first; i--) {
+          if (inGroup(this.tags[i].key)) {
+            this.tags.splice(i, 1);
+          }
+        }
+        this.tags[first] = { key: baseKey, tag, attrs };
+        this.counts.set(baseKey, 1);
+        return;
+      }
+      this.add(baseKey, tag, attrs);
       return;
     }
-    this.overridden.add(baseKey);
-    this.add(baseKey, tag, attrs);
+    // Further extra tags with this identity are all kept, right after the group.
+    let last = -1;
+    this.tags.forEach((item, index) => {
+      if (inGroup(item.key)) {
+        last = index;
+      }
+    });
+    const seen = this.counts.get(baseKey) ?? 0;
+    this.counts.set(baseKey, seen + 1);
+    const entry: HeadTag = { key: `${baseKey}#${seen}`, tag, attrs };
+    if (last === -1) {
+      this.tags.push(entry);
+    } else {
+      this.tags.splice(last + 1, 0, entry);
+    }
   }
 
   name(name: string, content: string | null | undefined): void {

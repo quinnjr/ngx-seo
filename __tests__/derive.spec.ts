@@ -598,4 +598,30 @@ describe('resolveHead', () => {
       { name: 'theme-color', content: '#000', media: '(prefers-color-scheme: dark)' },
     ]);
   });
+
+  it('lets a higher layer article field claim only the tags it produces', () => {
+    const head = resolveHead(
+      mergeLayers([
+        { meta: [{ property: 'article:publisher', content: 'https://facebook.com/acme' }, { property: 'article:section', content: 'Old' }] },
+        { title: 'P', openGraph: { type: 'article', article: { publishedTime: '2026-01-01', section: 'News' } } },
+      ]),
+      site,
+      { path: '/blog/post', origin: null },
+    );
+    expect(value(head, 'meta:property:article:publisher')).toBe('https://facebook.com/acme');
+    expect(head.tags.filter((t) => t.attrs['property'] === 'article:section').map((t) => t.attrs['content'])).toEqual(['News']);
+  });
+
+  it('lets a higher extra meta group replace every repeat of a lower derived tag', () => {
+    const merged = mergeLayers([
+      { openGraph: { alternateLocales: ['fr_FR', 'de_DE'], article: { tags: ['a', 'b', 'c'] } } },
+      { meta: [{ property: 'og:locale:alternate', content: 'es_ES' }, { property: 'article:tag', content: 'x' }, { property: 'article:tag', content: 'y' }] },
+    ]);
+    const head = resolveHead(merged, site, { path: '/', origin: null });
+    const contents = (property: string): string[] =>
+      head.tags.filter((t) => t.attrs['property'] === property).map((t) => t.attrs['content']);
+    expect(contents('og:locale:alternate')).toEqual(['es_ES']);
+    expect(contents('article:tag')).toEqual(['x', 'y']);
+    expect(new Set(head.tags.map((t) => t.key)).size).toBe(head.tags.length);
+  });
 });
