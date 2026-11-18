@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { provideZonelessChangeDetection } from '@angular/core';
+import { Component, provideZonelessChangeDetection } from '@angular/core';
+import { provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
 import { TestBed } from '@angular/core/testing';
 import { diagnose } from '../src/lib/diagnostics';
 import { resolveHead } from '../src/lib/derive';
@@ -80,6 +82,24 @@ describe('diagnostics in the Seo service', () => {
 
   it('is silenced with diagnostics off', () => {
     boot({ ...site, diagnostics: 'off' });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does not warn before the initial navigation has supplied page data', async () => {
+    @Component({ selector: 'seo-page', template: '' })
+    class Page {}
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([{ path: '', component: Page, resolve: { seo: () => Promise.resolve({ title: 'T', description: 'D' }) } }]),
+        provideSeo(site),
+      ],
+    });
+    TestBed.inject(Seo);
+    TestBed.tick();
+    const harness = await RouterTestingHarness.create();
+    await harness.navigateByUrl('/');
+    TestBed.tick();
     expect(warn).not.toHaveBeenCalled();
   });
 });

@@ -39,19 +39,29 @@ function isRemoval(value: unknown): value is SeoRemoval {
   return isPlainObject(value) && typeof value['$remove'] === 'string';
 }
 
-function isRobotsPath(path: string): boolean {
-  return path === 'robots' || (path.startsWith('bots.') && path.indexOf('.', 5) === -1);
-}
+/**
+ * Stands in for a reference cycle. JSON.stringify rejects BigInt, so a
+ * JSON-LD node containing a cycle is dropped at serialisation time.
+ */
+const CYCLE = BigInt(0);
 
-function cloneValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => cloneValue(item));
-  }
-  if (isPlainObject(value)) {
-    const out: Bag = {};
-    for (const [key, inner] of Object.entries(value)) {
-      out[key] = cloneValue(inner);
+function cloneValue(value: unknown, ancestors: Set<object> = new Set()): unknown {
+  if (Array.isArray(value) || isPlainObject(value)) {
+    if (ancestors.has(value)) {
+      return CYCLE;
     }
+    ancestors.add(value);
+    let out: unknown;
+    if (Array.isArray(value)) {
+      out = value.map((item) => cloneValue(item, ancestors));
+    } else {
+      const copy: Bag = {};
+      for (const [key, inner] of Object.entries(value)) {
+        copy[key] = cloneValue(inner, ancestors);
+      }
+      out = copy;
+    }
+    ancestors.delete(value);
     return out;
   }
   return value;
@@ -109,6 +119,10 @@ function mergeObject(target: Bag, source: Bag, path: string): void {
     if (value === undefined || value === '') {
       continue;
     }
+    // An image without a URL (e.g. an empty CMS field) has no opinion.
+    if (here === 'image' && isPlainObject(value) && !text(value['url'])) {
+      continue;
+    }
     if (value === null) {
       delete target[key];
       continue;
@@ -121,14 +135,14 @@ function mergeObject(target: Bag, source: Bag, path: string): void {
       continue;
     }
     if (Array.isArray(value)) {
-      target[key] = value.filter((item) => item !== null && item !== undefined && item !== '').map(cloneValue);
+      target[key] = value.filter((item) => item !== null && item !== undefined && item !== '').map((item) => cloneValue(item));
       continue;
     }
     if (isPlainObject(value) && !ATOMIC_OBJECTS.has(here)) {
       const existing = target[key];
-      // A robots object never merges into a raw string: it replaces it.
+      // An object never merges into a non-object (e.g. a raw robots string): it replaces it.
       const base: Bag = isPlainObject(existing) ? existing : {};
-      if (!isPlainObject(existing) || (isRobotsPath(here) && typeof existing === 'string')) {
+      if (!isPlainObject(existing)) {
         target[key] = base;
       }
       mergeObject(base, value, here);

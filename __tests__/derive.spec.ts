@@ -226,6 +226,34 @@ describe('resolveHead', () => {
     expect(head.tags.find((t) => t.key === 'link:humans')?.attrs).toEqual({ rel: 'author', href: 'https://x.test/humans.txt' });
   });
 
+  it('lets an extra meta or link override the derived tag with the same identity', () => {
+    const head = resolve({
+      description: 'D',
+      alternates: [{ hreflang: 'fr', href: '/fr' }],
+      meta: [
+        { name: 'description', content: 'Override' },
+        { property: 'og:type', content: 'article' },
+      ],
+      links: [
+        { rel: 'canonical', href: '/elsewhere' },
+        { rel: 'alternate', hreflang: 'fr', href: '/fr-2' },
+      ],
+    });
+    const count = (k: string): number => keys(head).filter((key) => key === k || key.startsWith(`${k}#`)).length;
+    expect(count('meta:name:description')).toBe(1);
+    expect(value(head, 'meta:name:description')).toBe('Override');
+    expect(count('meta:property:og:type')).toBe(1);
+    expect(value(head, 'meta:property:og:type')).toBe('article');
+    expect(count('link:canonical')).toBe(1);
+    expect(value(head, 'link:canonical')).toBe('https://x.test/elsewhere');
+    expect(count('link:alternate:fr')).toBe(1);
+    expect(value(head, 'link:alternate:fr')).toBe('https://x.test/fr-2');
+  });
+
+  it('treats an empty description as no description', () => {
+    expect(value(resolve({ title: 'T', description: '' }), 'meta:name:description')).toBeUndefined();
+  });
+
   it('orders tags by family', () => {
     const head = resolve({
       title: 'T',
@@ -296,7 +324,7 @@ describe('resolveHead', () => {
 
     it('resolves # ids against the current URL when canonical is false', () => {
       const [node] = graph(resolve({ canonical: false, jsonLd: [{ '@type': 'WebPage', '@id': '#page' }] }, site, '/p?x=1#frag'));
-      expect(node['@id']).toBe('https://x.test/p?x=1#page');
+      expect(node['@id']).toBe('https://x.test/p#page');
     });
 
     it('emits no script without nodes', () => {

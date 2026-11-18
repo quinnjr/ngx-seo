@@ -121,11 +121,11 @@ describe('HeadReconciler', () => {
     ]);
   });
 
-  it('sets the document title and leaves it alone for a null title', () => {
+  it('sets the document title and leaves the original alone for a null title', () => {
     const reconciler = new HeadReconciler(doc);
-    reconciler.apply(headOf([], { title: 'T' }));
-    expect(doc.title).toBe('T');
     reconciler.apply(headOf([], { title: null }));
+    expect(doc.title).toBe('Initial');
+    reconciler.apply(headOf([], { title: 'T' }));
     expect(doc.title).toBe('T');
   });
 
@@ -174,5 +174,16 @@ describe('HeadReconciler', () => {
     doc = makeDoc(`<meta ${SEO_ATTR}="meta:name:author" name="author" content="x">`);
     new HeadReconciler(doc).apply(headOf([]));
     expect(doc.head.querySelector('meta[name="author"]')).toBeNull();
+  });
+});
+
+describe('HeadReconciler title restore', () => {
+  it('restores the original document title when no title is resolved', () => {
+    const doc = makeDoc();
+    const reconciler = new HeadReconciler(doc);
+    reconciler.apply(headOf([], { title: 'A' }));
+    expect(doc.title).toBe('A');
+    reconciler.apply(headOf([], { title: null }));
+    expect(doc.title).toBe('Initial');
   });
 });

@@ -9,7 +9,8 @@ everything that repeats (Open Graph, Twitter, canonical, absolute URLs) and
 keeps `<head>` exactly in sync: complete in the server-rendered HTML, with no
 duplicates after hydration and nothing stale after a client navigation.
 
-- Zoneless and signal-based. No runtime dependencies.
+- Zoneless and signal-based. No third-party runtime dependencies; only
+  `tslib`, which every ng-packagr-built Angular library uses.
 - Peer dependencies: `@angular/core`, `@angular/common`,
   `@angular/platform-browser` and `@angular/router`, all `^21.0.0`.
 
@@ -54,7 +55,7 @@ export const appConfig: ApplicationConfig = {
 | Option | Default | Meaning |
 |---|---|---|
 | `siteName` | none | Used for `og:site_name` and passed to title templates. |
-| `baseUrl` | request origin (server), `location.origin` (browser) | Origin used to make URLs absolute. Set it explicitly in production. |
+| `baseUrl` | request origin (server), `location.origin` (browser) | Origin used to make URLs absolute. Set it in production: request hosts are client-supplied. In dev mode the server warns once if it is missing. |
 | `titleTemplate` | none | `'%s | Site'` or `(title, ctx) => string`. |
 | `defaultTitle` | none | Used when no layer sets a title. Not templated. |
 | `canonical` | `{ trailingSlash: 'preserve', keepQueryParams: [] }` | How the canonical is derived from the router URL. |
@@ -62,9 +63,10 @@ export const appConfig: ApplicationConfig = {
 | `routeDataKey` | `'seo'` | Route data key to read. |
 | `diagnostics` | `'warn'` | Dev-mode console warnings. `'off'` silences them. Never active in production or on the server. |
 
-`provideSeo()` also installs a router `TitleStrategy`, so a plain route
-`title` is fed into ngx-seo instead of being written straight to
-`document.title`.
+`provideSeo()` also installs a router `TitleStrategy`. A plain route `title`
+then becomes part of that route's SEO layer instead of being written straight
+to `document.title`. When no layer sets a title, the document keeps its
+original `index.html` title.
 
 ### Move SEO tags out of `index.html`
 
@@ -107,6 +109,10 @@ That is the whole declaration. The document title, canonical, `og:*`,
   data: { seo: (route: ActivatedRouteSnapshot) => ({ title: `Case ${route.paramMap.get('id')}` }) }
   ```
 
+  They run in the application's root injector, so services from a route's own
+  `providers` are not available. Use a resolver when you need those.
+- **Primary outlet only.** Only routes on the primary outlet chain are read.
+  Named outlets do not contribute SEO data.
 - **Resolvers** write into route data, so `resolve: { seo: postSeoResolver }`
   works with no extra API. This is the recommended path for CMS and blog
   pages, because the data is ready before the server renders the page.
@@ -154,9 +160,8 @@ tests or a preview panel.
 Layers, from lowest to highest priority:
 
 1. `defaults` from `provideSeo()`
-2. the route's `title`
-3. route `data.seo`, root route to leaf
-4. contributions, by `priority` (default `0`), then creation order
+2. each route on the primary chain, root to leaf: its `title`, then its `data.seo`
+3. contributions, by `priority` (default `0`), then creation order
 
 Merge rules:
 
@@ -218,8 +223,8 @@ All fields are optional.
 | `openGraph` | `title`, `description`, `type`, `url`, `siteName`, `locale`, `alternateLocales`, `images`, `videos`, `audio`, `article`, `profile`, `book`. |
 | `twitter` | `card`, `site`, `creator`, `title`, `description`, `image`, `imageAlt`. |
 | `jsonLd` | `JsonLdNode[]`. |
-| `meta` | Extra `{ name \| property \| httpEquiv, content, key? }[]`. |
-| `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, key? }[]`. |
+| `meta` | Extra `{ name \| property \| httpEquiv, content, key? }[]`. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it. |
+| `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, key? }[]`. A `canonical` or `alternate`+`hreflang` link replaces the derived one. |
 | `http` | `{ status, headers }`, applied to the server response. |
 
 ## Structured data (JSON-LD)
@@ -231,7 +236,9 @@ serialised is dropped and reported; the rest still render.
 
 **Ids and URLs**
 
-- `'#post'`: a page-level id, resolved against the page URL.
+- `'#post'`: a page-level id, resolved against the page's canonical URL (or,
+  with `canonical: false`, the current URL with the canonical query policy
+  applied).
 - `'/#org'`: a site-wide id, resolved against the site root, so it is the
   same on every page.
 - Reference other nodes by id, for example `publisher: { '@id': '/#org' }`.
@@ -268,6 +275,11 @@ data: { seo: { title: 'Page not found', robots: { index: false }, http: { status
 `AngularAppEngine`. `CommonEngine` provides neither, so with `CommonEngine`
 the `http` field does nothing and `baseUrl` must be set.
 
+An invalid header name or value (for example one containing a line break)
+is dropped and reported to `ErrorHandler`; the rest of the response and the
+head still render. A header the server had already set is restored when no
+page asks to override it any more.
+
 ## Hydration and navigation
 
 - **Server.** The full head is serialised once the app is stable, including
@@ -278,12 +290,20 @@ the `http` field does nothing and `baseUrl` must be set.
 - **Navigation.** The outgoing page's contributions and the new route's
   layers are swapped in the same change-detection pass, so the head moves
   straight from one page's complete state to the next.
-- **Errors.** An SEO error never fails a render. It is reported to
-  `ErrorHandler` and the previous head stays in place.
+- **Errors.** An SEO error never fails a render; it is reported to
+  `ErrorHandler`. Errors are contained as narrowly as possible:
+  - A JSON-LD node that cannot be serialised (for example a cycle) is dropped
+    on its own.
+  - A throwing title template falls back to the plain title.
+  - A throwing contribution or route function is skipped.
+  - If the whole page still cannot be resolved, the head falls back to the
+    site defaults, never to the previous page's tags.
+  - A DOM failure leaves the current head in place.
 
 ## Diagnostics
 
-In dev mode in the browser, ngx-seo warns once per page about:
+In dev mode in the browser, once the initial navigation has finished,
+ngx-seo warns once per page about:
 
 - a missing title or description
 - a URL it had to drop

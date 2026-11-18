@@ -3,7 +3,8 @@ import { ActivatedRouteSnapshot } from '@angular/router';
 import type { SeoConfig } from './types';
 
 /**
- * Collects SEO layers from the primary route chain, root to leaf. A value
+ * Collects SEO layers from the primary route chain, root to leaf. A route's
+ * own `title` sits just beneath that route's SEO value. A value
  * Angular has inherited into a child snapshot is used once. Function values
  * are called with the snapshot in an injection context; one that throws is
  * reported and skipped.
@@ -18,6 +19,10 @@ export function collectRouteLayers(
   const seen = new Set<unknown>();
   let snapshot: ActivatedRouteSnapshot | null = root;
   while (snapshot !== null) {
+    // Only a title the route declares itself; inherited titles are already counted.
+    if (snapshot.routeConfig?.title !== undefined && typeof snapshot.title === 'string') {
+      layers.push({ title: snapshot.title });
+    }
     const value: unknown = snapshot.data?.[key];
     if (value !== undefined && value !== null && !seen.has(value)) {
       seen.add(value);

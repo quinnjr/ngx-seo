@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Component, ErrorHandler, provideZonelessChangeDetection, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  EnvironmentInjector,
+  ErrorHandler,
+  createEnvironmentInjector,
+  provideZonelessChangeDetection,
+  signal,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideSeo } from '../src/lib/provide-seo';
 import { Seo } from '../src/lib/seo.service';
@@ -192,5 +200,70 @@ describe('injectSeo', () => {
 
   it('throws outside an injection context', () => {
     expect(() => injectSeo({})).toThrow();
+  });
+});
+
+describe('Seo error containment', () => {
+  beforeEach(() => {
+    document.head.innerHTML = '<title>Initial</title>';
+  });
+
+  function boot(site: SeoSiteConfig = { baseUrl: 'https://x.test' }) {
+    const errors = vi.fn();
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), provideSeo(site), { provide: ErrorHandler, useValue: { handleError: errors } }],
+    });
+    const seo = TestBed.inject(Seo);
+    TestBed.tick();
+    return { seo, errors };
+  }
+
+  it('drops only a cyclic JSON-LD node and renders the rest of the head', () => {
+    const { seo, errors } = boot();
+    const cyclic: Record<string, unknown> = { '@type': 'Thing' };
+    cyclic['self'] = cyclic;
+    seo.contribute({ description: 'D', jsonLd: [cyclic as never, { '@type': 'Ok' }] });
+    TestBed.tick();
+    expect(meta('description')).toBe('D');
+    const text = document.head.querySelector('script[type="application/ld+json"]')?.textContent ?? '';
+    expect(JSON.parse(text)['@graph']).toEqual([{ '@type': 'Ok' }]);
+    expect(errors).toHaveBeenCalled();
+  });
+
+  it('falls back to the untemplated title when the template throws', () => {
+    const { seo, errors } = boot({
+      baseUrl: 'https://x.test',
+      titleTemplate: () => {
+        throw new Error('bad template');
+      },
+    });
+    seo.contribute({ title: 'T', description: 'D' });
+    TestBed.tick();
+    expect(document.title).toBe('T');
+    expect(meta('description')).toBe('D');
+    expect(errors).toHaveBeenCalled();
+  });
+
+  it('ignores a contribution whose destroyRef is already destroyed', () => {
+    const { seo } = boot();
+    const injector = createEnvironmentInjector([], TestBed.inject(EnvironmentInjector));
+    const destroyRef = injector.get(DestroyRef);
+    injector.destroy();
+    const handle = seo.contribute({ author: 'Leaked' }, { destroyRef });
+    handle.set({ author: 'Still leaked' });
+    TestBed.tick();
+    expect(meta('author')).toBeNull();
+  });
+
+  it('ignores handle calls after the owning destroyRef fires', () => {
+    const { seo } = boot();
+    const injector = createEnvironmentInjector([], TestBed.inject(EnvironmentInjector));
+    const handle = seo.contribute({ author: 'A' }, { destroyRef: injector.get(DestroyRef) });
+    TestBed.tick();
+    expect(meta('author')).toBe('A');
+    injector.destroy();
+    handle.set({ author: 'B' });
+    TestBed.tick();
+    expect(meta('author')).toBeNull();
   });
 });

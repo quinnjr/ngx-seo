@@ -38,12 +38,17 @@ const routes: Routes = [
     },
   },
   { path: 'broken', component: Broken, data: { seo: { title: 'Broken' } } },
+  { path: 'bad-header', component: Missing, data: { seo: { title: 'Bad header', http: { headers: { 'X-Note': 'a\nb' } } } } },
   {
     path: 'missing',
     component: Missing,
     data: { seo: { title: 'Not found', robots: { index: false }, http: { status: 404, headers: { 'X-Robots-Tag': 'noindex' } } } },
   },
 ];
+
+const cyclicNode: Record<string, unknown> = { '@type': 'Thing' };
+cyclicNode['self'] = cyclicNode;
+routes.push({ path: 'cyclic', component: Missing, data: { seo: { title: 'Cyclic', jsonLd: [cyclicNode as never, { '@type': 'Ok' }] } } });
 
 const DOC = '<!doctype html><html><head><title>Shell</title><meta name="keywords" content="shell"></head><body><app-root></app-root></body></html>';
 
@@ -102,6 +107,19 @@ describe('server rendering', () => {
     const html = await render('/broken', site);
     expect(html).toContain('<title>Broken | S</title>');
     expect(html).toContain('<p>broken</p>');
+  });
+
+  it('still renders the head when a header value is invalid', async () => {
+    const responseInit: ResponseInit = { headers: new Headers() };
+    const html = await render('/bad-header', site, responseInit);
+    expect(html).toContain('<title>Bad header | S</title>');
+    expect((responseInit.headers as Headers).has('X-Note')).toBe(false);
+  });
+
+  it('drops a cyclic JSON-LD node and renders the rest', async () => {
+    const html = await render('/cyclic', site);
+    expect(html).toContain('<title>Cyclic | S</title>');
+    expect(html).toContain('"Ok"');
   });
 
   it('uses the request origin when there is no baseUrl', async () => {

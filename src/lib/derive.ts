@@ -48,6 +48,23 @@ class TagList {
     this.tags.push(text === undefined ? { key, tag, attrs } : { key, tag, attrs, text });
   }
 
+  private readonly overridden = new Set<string>();
+
+  /**
+   * Adds an extra tag. If a derived tag already has this identity, the extra
+   * tag replaces it in place instead of producing a duplicate.
+   */
+  override(baseKey: string, tag: HeadTag['tag'], attrs: Record<string, string>): void {
+    const existing = this.tags.find((item) => item.key === baseKey);
+    if (existing !== undefined && !this.overridden.has(baseKey)) {
+      this.overridden.add(baseKey);
+      existing.tag = tag;
+      existing.attrs = attrs;
+      return;
+    }
+    this.add(baseKey, tag, attrs);
+  }
+
   name(name: string, content: string | null | undefined): void {
     if (content) {
       this.add(`meta:name:${name}`, 'meta', { name, content });
@@ -87,25 +104,27 @@ function rootRelative(value: string, origin: string | null): string {
   return `${origin}${value}`;
 }
 
-function resolveJsonLd(value: unknown, pageUrl: string | null, origin: string | null, seen: WeakSet<object>): unknown {
-  if (Array.isArray(value)) {
-    if (seen.has(value)) {
-      return value;
-    }
-    seen.add(value);
-    return value.map((item) => resolveJsonLd(item, pageUrl, origin, seen));
-  }
+function resolveJsonLd(value: unknown, pageUrl: string | null, origin: string | null, ancestors: Set<object>): unknown {
   if (value === null || typeof value !== 'object' || value instanceof Date) {
     return value;
   }
-  if (seen.has(value)) {
+  if (ancestors.has(value)) {
     // Leave the cycle in place so serialisation drops this node.
     return value;
   }
-  seen.add(value);
+  ancestors.add(value);
+  try {
+    return Array.isArray(value)
+      ? value.map((item) => resolveJsonLd(item, pageUrl, origin, ancestors))
+      : resolveJsonLdObject(value as Bag, pageUrl, origin, ancestors);
+  } finally {
+    ancestors.delete(value);
+  }
+}
 
+function resolveJsonLdObject(value: Bag, pageUrl: string | null, origin: string | null, seen: Set<object>): Bag {
   const out: Bag = {};
-  for (const [key, inner] of Object.entries(value as Bag)) {
+  for (const [key, inner] of Object.entries(value)) {
     if (key === '@id' && typeof inner === 'string') {
       if (inner.startsWith('#')) {
         out[key] = pageUrl === null ? inner : `${pageUrl}${inner}`;
@@ -129,10 +148,6 @@ function resolveJsonLd(value: unknown, pageUrl: string | null, origin: string | 
   return out;
 }
 
-function stripHash(url: string): string {
-  const at = url.indexOf('#');
-  return at === -1 ? url : url.slice(0, at);
-}
 
 /**
  * Derives the full, explicit head for a merged config. Pure: no DOM, no DI.
@@ -155,16 +170,17 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   };
 
   // Canonical
+  const policy = {
+    trailingSlash: site.canonical?.trailingSlash ?? 'preserve',
+    keepQueryParams: site.canonical?.keepQueryParams ?? [],
+  } as const;
   let canonical: string | null = null;
   if (merged.canonical === false) {
     canonical = null;
   } else if (typeof merged.canonical === 'string') {
     canonical = url(merged.canonical, 'canonical');
   } else {
-    canonical = canonicalFor(env.path, origin, {
-      trailingSlash: site.canonical?.trailingSlash ?? 'preserve',
-      keepQueryParams: site.canonical?.keepQueryParams ?? [],
-    });
+    canonical = canonicalFor(env.path, origin, policy);
   }
 
   // Title
@@ -179,7 +195,14 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   const template = merged.titleTemplate === false ? null : (merged.titleTemplate ?? site.titleTemplate ?? null);
   let title: string | null = null;
   if (pageTitle !== null) {
-    title = template === null ? pageTitle : applyTemplate(template, pageTitle, ctx);
+    title = pageTitle;
+    if (template !== null) {
+      try {
+        title = applyTemplate(template, pageTitle, ctx);
+      } catch (error) {
+        onError(error);
+      }
+    }
   } else if (site.defaultTitle) {
     title = site.defaultTitle;
   }
@@ -316,11 +339,11 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       continue;
     }
     if (meta.name) {
-      list.add(`meta:name:${meta.name}`, 'meta', { name: meta.name, content: meta.content });
+      list.override(`meta:name:${meta.name}`, 'meta', { name: meta.name, content: meta.content });
     } else if (meta.property) {
-      list.add(`meta:property:${meta.property}`, 'meta', { property: meta.property, content: meta.content });
+      list.override(`meta:property:${meta.property}`, 'meta', { property: meta.property, content: meta.content });
     } else if (meta.httpEquiv) {
-      list.add(`meta:http-equiv:${meta.httpEquiv}`, 'meta', { 'http-equiv': meta.httpEquiv, content: meta.content });
+      list.override(`meta:http-equiv:${meta.httpEquiv}`, 'meta', { 'http-equiv': meta.httpEquiv, content: meta.content });
     }
   }
 
@@ -340,16 +363,21 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
         attrs[attr] = v;
       }
     }
-    list.add(link.key ? `link:${link.key}` : `link:${link.rel}:${href}`, 'link', attrs);
+    let key = link.key ? `link:${link.key}` : `link:${link.rel}:${href}`;
+    if (link.rel === 'canonical') {
+      key = 'link:canonical';
+      canonical = href;
+    } else if (link.rel === 'alternate' && link.hreflang) {
+      key = `link:alternate:${link.hreflang}`;
+    }
+    list.override(key, 'link', attrs);
   }
 
   // JSON-LD
   const nodes = (merged.jsonLd ?? []).filter((node): node is JsonLdNode => '@type' in node);
   if (nodes.length > 0) {
-    const current = canonical ?? absoluteUrl(env.path, origin);
-    const pageUrl = current === null ? null : stripHash(current);
-    const seen = new WeakSet<object>();
-    const resolved = nodes.map((node) => resolveJsonLd(node, pageUrl, origin, seen) as JsonLdNode);
+    const pageUrl = canonical ?? canonicalFor(env.path, origin, policy);
+    const resolved = nodes.map((node) => resolveJsonLd(node, pageUrl, origin, new Set()) as JsonLdNode);
     const text = serializeJsonLd(resolved, onError);
     if (text !== null) {
       list.add('script:jsonld', 'script', { type: 'application/ld+json' }, text);

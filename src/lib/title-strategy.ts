@@ -1,14 +1,13 @@
-import { Injectable, Injector, inject } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { RouterStateSnapshot, TitleStrategy } from '@angular/router';
-import { Seo } from './seo.service';
 
-/** Sends the router's `title` into the SEO route layer instead of writing `document.title`. */
+/**
+ * Stops the router writing `document.title` directly. ngx-seo reads each
+ * route's `title` as a layer and owns the document title.
+ */
 @Injectable()
 export class SeoTitleStrategy extends TitleStrategy {
-  // Resolved lazily: Seo injects Router, which injects this strategy.
-  private readonly injector = inject(Injector);
-
-  override updateTitle(snapshot: RouterStateSnapshot): void {
-    this.injector.get(Seo).setRouteTitle(this.buildTitle(snapshot));
+  override updateTitle(_snapshot: RouterStateSnapshot): void {
+    // Intentionally empty: the Seo service applies route titles.
   }
 }

@@ -214,6 +214,21 @@ describe('mergeLayers', () => {
   });
 
   describe('plain lists', () => {
+    it('copies plain lists of objects', () => {
+      expect(mergeLayers([{ openGraph: { videos: [{ url: '/v.mp4', type: 'video/mp4' }] } }]).openGraph?.videos).toEqual([
+        { url: '/v.mp4', type: 'video/mp4' },
+      ]);
+    });
+
+    it('treats an empty image url as unset so the default image still applies', () => {
+      expect(mergeLayers([{ image: '/default.png' }, { image: { url: '', alt: '' } }]).image).toBe('/default.png');
+      expect(mergeLayers([{ image: '/default.png' }, { image: '' }]).image).toBe('/default.png');
+    });
+
+    it('treats an empty description as unset', () => {
+      expect(mergeLayers([{ description: 'D' }, { description: '' }]).description).toBe('D');
+    });
+
     it('replaces keywords', () => {
       expect(mergeLayers([{ keywords: ['a', 'b'] }, { keywords: ['c'] }]).keywords).toEqual(['c']);
     });

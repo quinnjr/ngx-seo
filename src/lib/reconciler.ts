@@ -82,8 +82,11 @@ export class HeadReconciler {
   private readonly serverRendered: boolean;
   /** Original values of `<html>` attributes this reconciler has changed. */
   private readonly htmlOriginals = new Map<string, string | null>();
+  /** The title the document had before ngx-seo touched it. */
+  private readonly originalTitle: string;
 
   constructor(private readonly doc: Document) {
+    this.originalTitle = doc.title;
     for (const el of this.head ? elementsOf(this.head) : []) {
       const key = el.getAttribute(SEO_ATTR);
       if (key !== null && !this.managed.has(key)) {
@@ -108,8 +111,9 @@ export class HeadReconciler {
       return;
     }
 
-    if (head.title !== null && this.doc.title !== head.title) {
-      this.doc.title = head.title;
+    const title = head.title ?? this.originalTitle;
+    if (this.doc.title !== title) {
+      this.doc.title = title;
     }
     this.applyHtmlAttr('lang', head.htmlAttrs.lang);
     this.applyHtmlAttr('dir', head.htmlAttrs.dir);

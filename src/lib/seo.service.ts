@@ -44,6 +44,16 @@ interface Contribution {
   readonly value: Signal<SeoConfig>;
 }
 
+/** The missing-baseUrl warning is printed once per server process, not per request. */
+let warnedMissingBaseUrl = false;
+
+const DEAD_HANDLE: SeoHandle = {
+  set: () => {},
+  patch: () => {},
+  clear: () => {},
+  destroy: () => {},
+};
+
 const EMPTY_HEAD: ResolvedHead = {
   title: null,
   htmlAttrs: {},
@@ -67,7 +77,7 @@ export class Seo {
   private readonly platformId = inject(PLATFORM_ID);
   private readonly request = inject(REQUEST, { optional: true });
   private readonly response = isPlatformServer(this.platformId)
-    ? new ResponseWriter(inject(RESPONSE_INIT, { optional: true }))
+    ? new ResponseWriter(inject(RESPONSE_INIT, { optional: true }), (error) => this.report(error))
     : null;
   private readonly router = inject(Router, { optional: true });
   /** Router is root-provided; only apps that registered routes will navigate. */
@@ -76,11 +86,9 @@ export class Seo {
   private ready = !(isPlatformBrowser(this.platformId) && this.reconciler.hasServerRendered());
 
   private readonly routeLayers = signal<readonly SeoConfig[]>([]);
-  private readonly routeTitle = signal<string | undefined>(undefined);
   private readonly path = signal<string>(this.initialPath());
   private readonly contributions = signal<readonly Contribution[]>([]);
   private nextOrder = 0;
-  private lastGood: ResolvedHead = EMPTY_HEAD;
   private lastLayers: readonly SeoConfig[] = [];
   private readonly warned = new Set<string>();
   private readonly diagnostics =
@@ -89,27 +97,40 @@ export class Seo {
   /** The fully derived head for the current page. */
   readonly resolved: Signal<ResolvedHead> = computed(() => {
     try {
-      this.lastGood = this.compute();
+      return this.compute();
     } catch (error) {
       this.report(error);
     }
-    return this.lastGood;
+    // Never keep the previous page's tags: fall back to the site defaults alone.
+    try {
+      return this.computeDefaultsOnly();
+    } catch (error) {
+      this.report(error);
+      return EMPTY_HEAD;
+    }
   });
 
   constructor() {
     effect(() => {
       const head = this.resolved();
       untracked(() => {
-        this.response?.write(head.http);
         if (this.ready) {
           this.reconcile(head);
         }
-        if (this.diagnostics) {
+        this.writeResponse(head);
+        if (this.diagnostics && this.ready && (!this.routed || this.router?.navigated === true)) {
           this.warn(head);
         }
       });
     });
     this.followRouter();
+    if (isPlatformServer(this.platformId) && !this.site.baseUrl && isDevMode() && !warnedMissingBaseUrl) {
+      warnedMissingBaseUrl = true;
+      console.warn(
+        '[ngx-seo] No baseUrl is configured, so canonical and og:url URLs use the request host. ' +
+          'Set baseUrl in provideSeo() for production: request hosts are client-supplied.',
+      );
+    }
     if (!this.ready) {
       void this.takeOverAfterHydration();
     }
@@ -117,6 +138,25 @@ export class Seo {
 
   /** Adds a layer above routes and defaults. */
   contribute(config: Source, options: ContributeOptions = {}): SeoHandle {
+    let alive = true;
+    let unregister: (() => void) | undefined;
+    const kill = (): void => {
+      alive = false;
+      this.contributions.update((list) => list.filter((item) => item !== contribution));
+    };
+    if (options.destroyRef) {
+      try {
+        unregister = options.destroyRef.onDestroy(() => {
+          if (alive) {
+            kill();
+          }
+        });
+      } catch {
+        // The owner is already destroyed: contribute nothing.
+        return DEAD_HANDLE;
+      }
+    }
+
     const source: WritableSignal<Source> = signal(config);
     const patches = signal<SeoConfig>({});
     const value = computed<SeoConfig>(() => {
@@ -136,7 +176,6 @@ export class Seo {
     const contribution: Contribution = { priority: options.priority ?? 0, order: this.nextOrder++, value };
     this.contributions.update((list) => [...list, contribution]);
 
-    let alive = true;
     const handle: SeoHandle = {
       set: (next) => {
         if (alive) {
@@ -157,28 +196,12 @@ export class Seo {
       },
       destroy: () => {
         if (alive) {
-          alive = false;
-          this.contributions.update((list) => list.filter((item) => item !== contribution));
+          kill();
+          unregister?.();
         }
       },
     };
-    options.destroyRef?.onDestroy(() => handle.destroy());
     return handle;
-  }
-
-  /** @internal Route layers, root to leaf. */
-  setRouteLayers(layers: readonly SeoConfig[]): void {
-    this.routeLayers.set(layers);
-  }
-
-  /** @internal Title from the router's `title` property. */
-  setRouteTitle(title: string | undefined): void {
-    this.routeTitle.set(title);
-  }
-
-  /** @internal Current router path including query string. */
-  setPath(path: string): void {
-    this.path.set(path);
   }
 
   /**
@@ -240,17 +263,18 @@ export class Seo {
     const contributions = [...this.contributions()]
       .sort((a, b) => a.priority - b.priority || a.order - b.order)
       .map((item) => item.value());
-    const routeTitle = this.routeTitle();
-    const layers: SeoConfig[] = [
-      routeTitle === undefined ? {} : { title: routeTitle },
-      ...this.routeLayers(),
-      ...contributions,
-    ];
+    const layers: SeoConfig[] = [...this.routeLayers(), ...contributions];
     const env = { path: this.path(), origin: this.origin() };
     const all = [this.defaultsLayer(layers, env), ...layers];
     this.lastLayers = all;
     const merged = mergeLayers(all);
     return resolveHead(merged, this.site, { ...env, onError: (error) => this.report(error) });
+  }
+
+  private computeDefaultsOnly(): ResolvedHead {
+    const env = { path: this.path(), origin: this.origin() };
+    this.lastLayers = [];
+    return resolveHead(mergeLayers([this.defaultsLayer([], env)]), this.site, env);
   }
 
   private defaultsLayer(layers: SeoConfig[], env: { path: string; origin: string | null }): SeoConfig {
@@ -286,6 +310,14 @@ export class Seo {
         this.warned.add(id);
         console.warn(`[ngx-seo] ${message} (${path})`);
       }
+    }
+  }
+
+  private writeResponse(head: ResolvedHead): void {
+    try {
+      this.response?.write(head.http);
+    } catch (error) {
+      this.report(error);
     }
   }
 

@@ -126,6 +126,19 @@ describe('route SEO layers', () => {
     expect(document.title).toBe('Seo | S');
   });
 
+  it("puts each route's title just beneath that route's seo", async () => {
+    const { go } = await setup([
+      {
+        path: 'section',
+        data: { seo: { title: 'Section', author: 'S' } },
+        children: [{ path: 'child', component: Page, title: 'Child' }],
+      },
+    ]);
+    await go('/section/child');
+    expect(document.title).toBe('Child | S');
+    expect(meta('author')).toBe('S');
+  });
+
   it('follows the navigated URL for the canonical and drops the query string', async () => {
     const { go } = await setup([{ path: 'list', component: Page }]);
     await go('/list?utm_source=x');
@@ -163,5 +176,35 @@ describe('route SEO layers', () => {
     expect(meta('author')).toBe('Parent');
     expect(canonical()).toBe('https://x.test/p/c');
     expect(errors).toHaveBeenCalled();
+  });
+});
+
+describe('route errors', () => {
+  beforeEach(() => {
+    document.head.innerHTML = '<title>Initial</title>';
+  });
+
+  it('does not carry the previous page tags over when the next page fails to resolve', async () => {
+    const { go } = await setup(
+      [
+        { path: 'a', component: Page, data: { seo: { title: 'A', description: 'About A', robots: { index: false } } } },
+        { path: 'b', component: Page, data: { seo: { title: 'B' } } },
+      ],
+      {
+        baseUrl: 'https://x.test',
+        titleTemplate: (title: string) => {
+          if (title === 'B') {
+            throw new Error('bad template');
+          }
+          return title;
+        },
+      },
+    );
+    await go('/a');
+    expect(meta('robots')).toBe('noindex');
+    await go('/b');
+    expect(meta('robots')).toBeNull();
+    expect(meta('description')).toBeNull();
+    expect(canonical()).toBe('https://x.test/b');
   });
 });
