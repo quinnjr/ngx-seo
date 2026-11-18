@@ -682,7 +682,7 @@ export class Seo {
 
   /** Whether a server copy still stands in: its host is still in the page, or its route is still attached. */
   private copyStillApplies(id: string, attached: ReadonlySet<ActivatedRoute | Route> | null): boolean {
-    const routeMatch = /^r:(.+)#\d+$/.exec(id);
+    const routeMatch = /^r:([^#]+)#/.exec(id);
     if (routeMatch !== null) {
       const config = this.routeAt(routeMatch[1]);
       return config !== null && (attached === null || attached.has(config));

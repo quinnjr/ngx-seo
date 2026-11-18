@@ -9,8 +9,10 @@ import {
   destroyPlatform,
   inject,
   input,
+  PLATFORM_ID,
   provideZonelessChangeDetection,
 } from '@angular/core';
+import { isPlatformServer } from '@angular/common';
 import { getTestBed } from '@angular/core/testing';
 import {
   bootstrapApplication,
@@ -400,6 +402,67 @@ describe('incremental hydration', () => {
     expect(parsed.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
     expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
     expect(document.head.querySelector('meta[name="keywords"]')?.getAttribute('content')).toBe('b');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('carries a keyed route-service contribution', async () => {
+    @Injectable()
+    class ProductSeo {
+      readonly seo = injectSeo({ description: 'svc-desc' }, { key: 'product' });
+    }
+    @Component({ selector: 'keyed-x', template: '<p>k</p>' })
+    class KeyedX {
+      readonly svc = inject(ProductSeo);
+    }
+    @Component({ selector: 'page-k', imports: [KeyedX], template: '@defer (hydrate on interaction) { <keyed-x /> }' })
+    class PageK {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(
+      App,
+      [{ path: 'k', component: PageK, providers: [ProductSeo], data: { seo: { description: 'route-desc' } } }],
+      '/k',
+      { baseUrl: 'https://x.test' } as typeof site,
+    );
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('svc-desc');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+
+  it('claims no copy when several route services differ between server and browser', async () => {
+    @Injectable()
+    class SvcA {
+      readonly seo = injectSeo({ description: 'a-desc' });
+    }
+    @Injectable()
+    class SvcB {
+      private readonly server = isPlatformServer(inject(PLATFORM_ID));
+      readonly seo = injectSeo({ keywords: [this.server ? 'b-server' : 'b-browser'] });
+    }
+    @Component({ selector: 'lazy-a', template: '<p>a</p>' })
+    class LazyA {
+      readonly svc = inject(SvcA);
+    }
+    @Component({ selector: 'now-b', template: '<p>b</p>' })
+    class NowB {
+      readonly svc = inject(SvcB);
+    }
+    @Component({
+      selector: 'page-diff',
+      imports: [LazyA, NowB],
+      template: '@defer (hydrate on interaction) { <lazy-a /> } @defer (hydrate on immediate) { <now-b /> }',
+    })
+    class PageDiff {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(
+      App,
+      [{ path: 'd', component: PageDiff, providers: [SvcA, SvcB], data: { seo: { description: 'route-desc' } } }],
+      '/d',
+      { baseUrl: 'https://x.test' } as typeof site,
+    );
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
     errors.mockRestore();
     appRef.destroy();
     destroyPlatform();
