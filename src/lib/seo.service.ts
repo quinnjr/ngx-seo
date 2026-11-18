@@ -1,6 +1,7 @@
 import {
   DestroyRef,
   DOCUMENT,
+  EnvironmentInjector,
   ErrorHandler,
   Injectable,
   Signal,
@@ -11,9 +12,11 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { NavigationEnd, Router } from '@angular/router';
 import { resolveHead } from './derive';
 import { mergeLayers } from './merge';
 import { HeadReconciler } from './reconciler';
+import { collectRouteLayers } from './route-layers';
 import { SEO_SITE_CONFIG } from './tokens';
 import type { ResolvedHead, SeoConfig, SeoContext, SeoHandle, SeoSiteConfig } from './types';
 import { originOf } from './url';
@@ -76,6 +79,7 @@ export class Seo {
       const head = this.resolved();
       untracked(() => this.reconcile(head));
     });
+    this.followRouter();
   }
 
   /** Adds a layer above routes and defaults. */
@@ -142,6 +146,30 @@ export class Seo {
   /** @internal Current router path including query string. */
   setPath(path: string): void {
     this.path.set(path);
+  }
+
+  private followRouter(): void {
+    const router = inject(Router, { optional: true });
+    if (router === null) {
+      return;
+    }
+    const injector = inject(EnvironmentInjector);
+    const key = this.site.routeDataKey ?? 'seo';
+    const sync = (): void => {
+      this.path.set(router.url);
+      this.routeLayers.set(
+        collectRouteLayers(router.routerState.snapshot.root, key, injector, (error) => this.report(error)),
+      );
+    };
+    const subscription = router.events.subscribe((event) => {
+      if (event instanceof NavigationEnd) {
+        sync();
+      }
+    });
+    inject(DestroyRef).onDestroy(() => subscription.unsubscribe());
+    if (router.navigated) {
+      sync();
+    }
   }
 
   private compute(): ResolvedHead {
