@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ActivatedRouteSnapshot } from '@angular/router';
-import type { RouteSeo, SeoMetaTag } from '../src/lib/types';
+import type { BlogPosting, Organization, Thing, WithContext } from 'schema-dts';
+import type { RouteSeo, SeoConfig, SeoMetaTag } from '../src/lib/types';
 
 describe('public types', () => {
   it('accepts a route function typed with ActivatedRouteSnapshot', () => {
@@ -15,5 +16,13 @@ describe('public types', () => {
     const both: SeoMetaTag = { name: 'a', property: 'b', content: 'x' };
     const good: SeoMetaTag[] = [{ name: 'a', content: 'x' }, { property: 'og:x', content: 'y' }, { httpEquiv: 'refresh', content: '5' }];
     expect([bad, both, good].length).toBe(3);
+  });
+
+  it('accepts schema-dts nodes', () => {
+    const org: Organization = { '@type': 'Organization', name: 'Acme' };
+    const post: WithContext<BlogPosting> = { '@context': 'https://schema.org', '@type': 'BlogPosting', headline: 'H' };
+    const thing: Thing = { '@type': 'Thing', name: 'x' };
+    const config: SeoConfig = { jsonLd: [org, post, thing] };
+    expect(config.jsonLd).toHaveLength(3);
   });
 });

@@ -11,7 +11,7 @@ import { Router, provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
 import { provideSeo } from '../src/lib/provide-seo';
 import { SEO_ATTR } from '../src/lib/reconciler';
-import { Seo } from '../src/lib/seo.service';
+import { SEO_TAKEOVER_TIMEOUT, Seo } from '../src/lib/seo.service';
 import type { SeoConfig } from '../src/lib/types';
 
 @Component({ selector: 'seo-page', template: '' })
@@ -93,4 +93,50 @@ describe('hydration', () => {
     expect(authors).toHaveLength(1);
     expect(authors[0].getAttribute('content')).toBe('routed');
   });
+
+  it('takes over on the next navigation when the app never becomes stable', async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideEnvironmentInitializer(() => {
+          inject(PendingTasks).add();
+        }),
+        provideRouter([
+          { path: 'a', component: Page, data: { seo: { title: 'A', description: 'about a' } } },
+          { path: 'b', component: Page, data: { seo: { title: 'B', description: 'about b' } } },
+        ]),
+        provideSeo({ baseUrl: 'https://x.test' }),
+      ],
+    });
+    TestBed.inject(Seo);
+    const router = TestBed.inject(Router);
+    await router.navigateByUrl('/a');
+    TestBed.tick();
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('server');
+    await router.navigateByUrl('/b');
+    await new Promise((resolve) => setTimeout(resolve));
+    TestBed.tick();
+    expect(document.title).toBe('B');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('about b');
+  });
+
+  it('takes over after a timeout when the app never becomes stable', async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideEnvironmentInitializer(() => {
+          inject(PendingTasks).add();
+        }),
+        { provide: SEO_TAKEOVER_TIMEOUT, useValue: 20 },
+        provideSeo({ baseUrl: 'https://x.test' }),
+      ],
+    });
+    TestBed.inject(Seo).contribute({ author: 'client' });
+    TestBed.tick();
+    expect(document.head.querySelector('meta[name="author"]')?.getAttribute('content')).toBe('server');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    TestBed.tick();
+    expect(document.head.querySelector('meta[name="author"]')?.getAttribute('content')).toBe('client');
+  });
 });
+

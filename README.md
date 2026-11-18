@@ -70,8 +70,9 @@ original `index.html` title, even after hydration: the server records the
 shell's title and `<html lang/dir>` for the browser.
 
 If your app provides its own `TitleStrategy` after `provideSeo()`, that
-strategy owns route titles: ngx-seo ignores route `title` and never resets
-the document title. It still applies `seo.title` from layers.
+strategy owns route titles: ngx-seo ignores route `title`, never resets the
+document title and does not apply `defaultTitle`. It still applies
+`seo.title` from layers.
 
 ### Move SEO tags out of `index.html`
 
@@ -167,10 +168,16 @@ export class FaqSectionComponent {
 Outside an injection context, use the service:
 `inject(Seo).contribute(config, { priority, destroyRef, route })`.
 
-A contribution from `injectSeo` belongs to the component's route. It applies
-only while that route is attached, so a page kept alive by a
-`RouteReuseStrategy` stops contributing when you navigate away, and
-contributes again when it is reattached.
+A contribution from `injectSeo` belongs to a route and applies only while
+that route is attached. It stops when you navigate away and starts again
+when you come back.
+- **In a component,** that is the component's own route. This covers pages
+  kept alive by a `RouteReuseStrategy`.
+- **In a service from a route's `providers`** (or a lazy route's injector),
+  that is the route that provides it. Such services are never destroyed, so
+  this is what stops them leaking onto other pages.
+- **In a root service,** the contribution applies everywhere until it is
+  destroyed.
 `inject(Seo).resolved` is a signal of the fully derived head, useful for
 tests or a preview panel.
 
@@ -237,7 +244,9 @@ Only where the merged config leaves a value unset:
   - The serving path comes from `APP_BASE_HREF` or `<base href>` when that
     is not `/`, otherwise from the path of `baseUrl`. For example,
     `baseUrl: 'https://x.test/docs/'` gives `https://x.test/docs/<route>`.
-  - Other root-relative URLs, such as images, resolve against the origin.
+  - Other URLs: root-relative ones (`/assets/og.png`) resolve against the
+    origin; document-relative ones (`assets/og.png`, or `list` for a
+    canonical) resolve against the serving path, as the browser would.
 - **Absolute URLs.** Every head URL is made absolute. This covers derived
   tags, `links`, refresh targets, and extra `meta` whose name or property
   holds a URL (`og:url`, `og:image*`, `og:video*`, `og:audio*`,
@@ -329,8 +338,9 @@ page asks to override it any more.
 - **Server.** The full head is serialised once the app is stable, including
   resolver data and component contributions.
 - **Hydration.** The browser adopts the server's tags and leaves them alone
-  until the initial navigation finishes and the app is first stable. Only
-  then does it reconcile.
+  until the initial navigation has finished. It takes over at the first of
+  three things: the app becoming stable, one second passing (an app with a
+  recurring timer may never be stable), or the next navigation.
 - **Navigation.** The outgoing page's contributions and the new route's
   layers are swapped in the same change-detection pass, so the head moves
   straight from one page's complete state to the next.

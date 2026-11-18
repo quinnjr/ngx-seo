@@ -7,9 +7,11 @@ export interface SeoRemoval {
 
 /** A schema.org node. Objects typed with `schema-dts` are structurally compatible. */
 export interface JsonLdNode {
-  '@type': string | string[];
+  '@type': string | readonly string[];
   '@id'?: string;
-  [key: string]: unknown;
+  // `any`, not `unknown`: interface-based node types (e.g. schema-dts) only satisfy an `any` index signature.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any;
 }
 
 export interface SeoImage {

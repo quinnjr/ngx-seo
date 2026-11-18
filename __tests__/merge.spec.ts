@@ -338,4 +338,18 @@ describe('mergeLayers', () => {
     const merged = mergeLayers([{ openGraph: { images: 'https://x.test/a.jpg' as never } }]);
     expect(merged.openGraph?.images).toEqual([{ url: 'https://x.test/a.jpg' }]);
   });
+
+  it('removes items whose keys differ only in case from how they were written', () => {
+    const merged = mergeLayers([
+      {
+        alternates: [{ hreflang: 'en-US', href: '/en' }],
+        links: [{ rel: 'alternate', hreflang: 'pt-BR', href: '/pt' }],
+        meta: [{ name: 'Theme-Color', content: 'red' }],
+      },
+      { alternates: [removeItem('en-US')], links: [removeItem('alternate|pt-BR')], meta: [removeItem('Theme-Color')] },
+    ]);
+    expect(merged.alternates).toEqual([]);
+    expect(merged.links).toEqual([]);
+    expect(merged.meta).toEqual([]);
+  });
 });

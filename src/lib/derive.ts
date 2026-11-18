@@ -23,6 +23,8 @@ export interface ResolveEnv {
   path: string;
   /** Request or window origin, used when the site has no `baseUrl`. */
   origin: string | null;
+  /** Path the app is served under (e.g. `/blog/`); document-relative URLs resolve against it. */
+  basePath?: string;
   /** Receives JSON-LD serialisation errors. */
   onError?: (error: unknown) => void;
 }
@@ -273,6 +275,9 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   const origin = originOf(base);
   const droppedUrls: string[] = [];
   const onError = env.onError ?? (() => {});
+  // Root-relative URLs resolve against the origin, document-relative ones against the serving path.
+  const basePath = env.basePath && env.basePath !== '/' ? `/${env.basePath.replace(/^\/+|\/+$/g, '')}/` : '/';
+  const documentBase = origin === null ? null : `${origin}${basePath}`;
   const list = new TagList();
 
   /** Runs one section; on failure, rolls its tags back and reports. */
@@ -299,7 +304,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     if (text === undefined) {
       return null;
     }
-    const resolved = absoluteUrl(text, origin);
+    const resolved = absoluteUrl(text, documentBase);
     if (resolved === null) {
       droppedUrls.push(field);
     }
@@ -352,7 +357,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     const canonicalLink = objects<SeoLinkTag>(merged.links)
       .filter((link) => str(link.rel)?.toLowerCase() === 'canonical' && str(link.href))
       .pop();
-    const fromLink = canonicalLink ? absoluteUrl(canonicalLink.href, origin) : null;
+    const fromLink = canonicalLink ? absoluteUrl(canonicalLink.href, documentBase) : null;
     if (fromLink !== null) {
       // An extra canonical link overrides the derived canonical everywhere, og:url included.
       return fromLink;

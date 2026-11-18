@@ -546,4 +546,15 @@ describe('resolveHead', () => {
     expect(value(head, 'meta:property:og:video')).toBe('https://x.test/v.mp4');
     expect(value(head, 'meta:property:og:audio')).toBe('https://x.test/a.mp3');
   });
+
+  it('resolves document-relative URLs against the path the app is served under', () => {
+    const head = resolveHead({ image: 'assets/og.png', canonical: 'list', links: [{ rel: 'icon', href: '/favicon.ico' }] }, site, {
+      path: '/blog/list',
+      origin: null,
+      basePath: '/blog/',
+    });
+    expect(head.tags.find((t) => t.key === 'meta:property:og:image')?.attrs['content']).toBe('https://x.test/blog/assets/og.png');
+    expect(head.canonical).toBe('https://x.test/blog/list');
+    expect(head.tags.find((t) => t.attrs['rel'] === 'icon')?.attrs['href']).toBe('https://x.test/favicon.ico');
+  });
 });

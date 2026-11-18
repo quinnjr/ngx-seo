@@ -353,5 +353,35 @@ describe('route lifecycle', () => {
     expect(errors).toHaveBeenCalled();
     expect(String((errors.mock.calls[0][0] as Error).message)).toContain('resolver');
   });
+
+  it('leaves the title to an app TitleStrategy even with a defaultTitle', async () => {
+    const { go } = await setup([{ path: 't', component: Page, title: 'T' }], { baseUrl: 'https://x.test', defaultTitle: 'Site' }, [
+      { provide: TitleStrategy, useClass: CustomTitle },
+    ]);
+    await go('/t');
+    expect(document.title).toBe('Custom T');
+  });
+
+  it("drops a route-provided service's contribution when the route is left", async () => {
+    @Injectable()
+    class DraftSeo {
+      readonly seo = injectSeo({ title: 'Draft', robots: { index: false } });
+    }
+    @Component({ selector: 'seo-draft', template: '' })
+    class DraftPage {
+      readonly drafts = inject(DraftSeo);
+    }
+    const { go } = await setup([
+      { path: 'drafts', providers: [DraftSeo], component: DraftPage },
+      { path: 'home', component: Page, data: { seo: { title: 'Home' } } },
+    ]);
+    await go('/drafts');
+    expect(document.title).toBe('Draft | S');
+    await go('/home');
+    expect(document.title).toBe('Home | S');
+    expect(meta('robots')).toBeNull();
+    await go('/drafts');
+    expect(document.title).toBe('Draft | S');
+  });
 });
 

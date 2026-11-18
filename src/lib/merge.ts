@@ -41,6 +41,9 @@ function linkKey(item: Bag): string {
 /** Keyed lists where higher layers come first. */
 const HIGHER_FIRST = new Set(['openGraph.images']);
 
+/** Lists whose keys are compared case-insensitively, as their HTML counterparts are. */
+const CASE_INSENSITIVE = new Set(['alternates', 'meta', 'links']);
+
 /** Values that are replaced whole instead of merged field by field. */
 const ATOMIC_OBJECTS = new Set(['image']);
 
@@ -115,8 +118,11 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
   const result = [...existing];
   const fresh: unknown[] = [];
 
+  const same = CASE_INSENSITIVE.has(path)
+    ? (a: string | undefined, b: string): boolean => a !== undefined && a.toLowerCase() === b.toLowerCase()
+    : (a: string | undefined, b: string): boolean => a === b;
   const indexOfKey = (list: unknown[], key: string): number =>
-    list.findIndex((item) => isPlainObject(item) && keyOf(item) === key);
+    list.findIndex((item) => isPlainObject(item) && same(keyOf(item), key));
 
   for (const raw of incoming) {
     // A bare URL is accepted where an image object is expected.

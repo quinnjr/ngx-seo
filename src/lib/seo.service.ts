@@ -5,6 +5,7 @@ import {
   EnvironmentInjector,
   ErrorHandler,
   Injectable,
+  InjectionToken,
   PLATFORM_ID,
   REQUEST,
   RESPONSE_INIT,
@@ -25,6 +26,7 @@ import {
   NavigationSkipped,
   ROUTES,
   type ActivatedRoute,
+  type Route,
   Router,
   TitleStrategy,
 } from '@angular/router';
@@ -45,21 +47,31 @@ export interface ContributeOptions {
   /** Removes the contribution when this is destroyed. */
   destroyRef?: DestroyRef;
   /**
-   * The route the contribution belongs to. It only applies while that route is
-   * attached, so a page kept alive by a `RouteReuseStrategy` stops
+   * The route the contribution belongs to: an `ActivatedRoute`, or a `Route`
+   * config. It only applies while that route is attached, so a page kept alive
+   * by a `RouteReuseStrategy`, or a service from a route's `providers`, stops
    * contributing once you navigate away. `injectSeo` sets this for you.
    */
-  route?: ActivatedRoute | null;
+  route?: ActivatedRoute | Route | null;
 }
 
 type Source = SeoConfig | (() => SeoConfig);
 
 interface Contribution {
-  readonly route: ActivatedRoute | null;
+  readonly route: ActivatedRoute | Route | null;
   readonly priority: number;
   readonly order: number;
   readonly value: Signal<SeoConfig>;
 }
+
+/**
+ * How long the browser waits for the app to become stable before taking over
+ * server-rendered tags anyway. Internal; tests shorten it.
+ */
+export const SEO_TAKEOVER_TIMEOUT = new InjectionToken<number>('SEO_TAKEOVER_TIMEOUT', {
+  providedIn: 'root',
+  factory: () => 1000,
+});
 
 /** The missing-baseUrl warning is printed once per server process, not per request. */
 let warnedMissingBaseUrl = false;
@@ -101,6 +113,10 @@ export class Seo {
     restoreTitle: this.ownsTitles || !this.routed,
   });
   private readonly basePath = this.resolveBasePath();
+  private readonly rootInjector = inject(EnvironmentInjector);
+  /** The site config as applied: without `defaultTitle` while another TitleStrategy owns titles. */
+  private readonly effectiveSite: SeoSiteConfig =
+    this.ownsTitles || !this.routed ? this.site : { ...this.site, defaultTitle: undefined };
   private readonly request = inject(REQUEST, { optional: true });
   private readonly response = isPlatformServer(this.platformId)
     ? new ResponseWriter(inject(RESPONSE_INIT, { optional: true }), (error) => this.report(error))
@@ -113,7 +129,7 @@ export class Seo {
   private readonly path = signal<string>(this.initialPath());
   private readonly contributions = signal<readonly Contribution[]>([]);
   /** Routes currently attached to the router state; null when no router is tracked. */
-  private readonly attached = signal<ReadonlySet<ActivatedRoute> | null>(null);
+  private readonly attached = signal<ReadonlySet<ActivatedRoute | Route> | null>(null);
   private nextOrder = 0;
   /** Depth of reactive computation; errors raised inside are delivered after it. */
   private computing = 0;
@@ -252,6 +268,7 @@ export class Seo {
    */
   private async takeOverAfterHydration(): Promise<void> {
     const appRef = inject(ApplicationRef);
+    const timeout = inject(SEO_TAKEOVER_TIMEOUT);
     const router = this.router;
     try {
       if (router !== null && this.routed && !router.navigated) {
@@ -269,7 +286,23 @@ export class Seo {
           });
         });
       }
-      await appRef.whenStable();
+      // Take over at the first of: the app becoming stable, a timeout (apps with
+      // recurring timers may never be stable), or the next navigation.
+      let cleanup = (): void => {};
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, timeout);
+        const subscription = router?.events.subscribe((event) => {
+          if (event instanceof NavigationEnd) {
+            resolve();
+          }
+        });
+        cleanup = () => {
+          clearTimeout(timer);
+          subscription?.unsubscribe();
+        };
+        void appRef.whenStable().then(() => resolve());
+      });
+      cleanup();
     } finally {
       this.ready = true;
       const head = untracked(this.resolved);
@@ -289,9 +322,13 @@ export class Seo {
     const injector = inject(EnvironmentInjector);
     const key = this.site.routeDataKey ?? 'seo';
     const trackAttached = (): void => {
-      const routes = new Set<ActivatedRoute>();
+      const routes = new Set<ActivatedRoute | Route>();
       const visit = (route: ActivatedRoute): void => {
         routes.add(route);
+        const config = route.snapshot?.routeConfig;
+        if (config) {
+          routes.add(config);
+        }
         for (const child of route.children) {
           visit(child);
         }
@@ -326,20 +363,47 @@ export class Seo {
       .sort((a, b) => a.priority - b.priority || a.order - b.order)
       .map((item) => item.value());
     const layers: SeoConfig[] = [...this.routeLayers(), ...contributions];
-    const env = { path: this.path(), origin: this.origin() };
+    const env = { path: this.path(), origin: this.origin(), basePath: this.basePath };
     const all = [this.defaultsLayer(layers, env), ...layers];
     this.lastLayers = all;
     const merged = mergeLayers(all, (error) => this.report(error));
-    return resolveHead(merged, this.site, { ...env, onError: (error) => this.report(error) });
+    return resolveHead(merged, this.effectiveSite, { ...env, onError: (error) => this.report(error) });
   }
 
   private computeDefaultsOnly(): ResolvedHead {
-    const env = { path: this.path(), origin: this.origin() };
+    const env = { path: this.path(), origin: this.origin(), basePath: this.basePath };
     this.lastLayers = [];
-    return resolveHead(mergeLayers([this.defaultsLayer([], env)]), this.site, env);
+    return resolveHead(mergeLayers([this.defaultsLayer([], env)]), this.effectiveSite, env);
   }
 
-  private defaultsLayer(layers: SeoConfig[], env: { path: string; origin: string | null }): SeoConfig {
+  /**
+   * @internal The route config a contribution made from `injector` belongs to,
+   * for services rather than components: a service from a route's `providers`
+   * (or a lazy route's injector) belongs to that route. Root services, and
+   * injectors the router did not create, belong to no route.
+   */
+  routeForInjector(injector: EnvironmentInjector): Route | null {
+    const router = this.router;
+    if (router === null || injector === this.rootInjector) {
+      return null;
+    }
+    type InternalRoute = Route & { _injector?: unknown; _loadedInjector?: unknown; _loadedRoutes?: Route[] };
+    const search = (routes: readonly Route[] | undefined): Route | null => {
+      for (const route of (routes ?? []) as InternalRoute[]) {
+        if (route._injector === injector || route._loadedInjector === injector) {
+          return route;
+        }
+        const found = search(route.children) ?? search(route._loadedRoutes);
+        if (found !== null) {
+          return found;
+        }
+      }
+      return null;
+    };
+    return search(router.config);
+  }
+
+  private defaultsLayer(layers: SeoConfig[], env: { path: string; origin: string | null; basePath?: string }): SeoConfig {
     const defaults = this.site.defaults;
     if (typeof defaults !== 'function') {
       return defaults ?? {};
@@ -347,7 +411,7 @@ export class Seo {
     const higher = mergeLayers(layers);
     const ctx: SeoContext = {
       url: env.path,
-      canonical: resolveHead(higher, this.site, env).canonical,
+      canonical: resolveHead(higher, this.effectiveSite, env).canonical,
       title: higher.title ?? null,
       description: higher.description ?? null,
       siteName: this.site.siteName ?? null,
