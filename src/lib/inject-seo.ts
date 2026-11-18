@@ -1,4 +1,5 @@
 import { DestroyRef, assertInInjectionContext, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { Seo } from './seo.service';
 import type { SeoConfig, SeoHandle } from './types';
 
@@ -13,5 +14,9 @@ export interface InjectSeoOptions {
  */
 export function injectSeo(config: SeoConfig | (() => SeoConfig), options: InjectSeoOptions = {}): SeoHandle {
   assertInInjectionContext(injectSeo);
-  return inject(Seo).contribute(config, { priority: options.priority, destroyRef: inject(DestroyRef) });
+  return inject(Seo).contribute(config, {
+    priority: options.priority,
+    destroyRef: inject(DestroyRef),
+    route: inject(ActivatedRoute, { optional: true }),
+  });
 }

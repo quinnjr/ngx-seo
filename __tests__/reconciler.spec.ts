@@ -252,3 +252,32 @@ describe('HeadReconciler DOM failures', () => {
     expect(doc.head.querySelector('meta[name="keywords"]')).toBeNull();
   });
 });
+
+describe('HeadReconciler link adoption', () => {
+  it('adopts a relative index.html link with the same resolved href', () => {
+    const doc = makeDoc('<link rel="icon" href="/favicon.ico">');
+    const base = new URL('/favicon.ico', doc.baseURI).href;
+    new HeadReconciler(doc).apply(headOf([{ key: 'link:icon:x', tag: 'link', attrs: { rel: 'icon', href: base } }]));
+    expect(doc.head.querySelectorAll('link[rel="icon"]')).toHaveLength(1);
+  });
+
+  it('takes over an icon link with a different href and restores it afterwards', () => {
+    const doc = makeDoc('<link rel="icon" href="/favicon.ico">');
+    const reconciler = new HeadReconciler(doc);
+    reconciler.apply(headOf([{ key: 'link:icon:x', tag: 'link', attrs: { rel: 'icon', href: 'https://x.test/page.ico' } }]));
+    expect(doc.head.querySelectorAll('link[rel="icon"]')).toHaveLength(1);
+    reconciler.apply(headOf([]));
+    const icons = doc.head.querySelectorAll('link[rel="icon"]');
+    expect(icons).toHaveLength(1);
+    expect(icons[0].getAttribute('href')).toBe('/favicon.ico');
+  });
+
+  it('does not take over an icon of a different size', () => {
+    const doc = makeDoc('<link rel="icon" sizes="16x16" href="/16.png">');
+    new HeadReconciler(doc).apply(
+      headOf([{ key: 'link:icon:x', tag: 'link', attrs: { rel: 'icon', sizes: '32x32', href: 'https://x.test/32.png' } }]),
+    );
+    expect(doc.head.querySelectorAll('link[rel="icon"]')).toHaveLength(2);
+  });
+});
+

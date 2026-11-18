@@ -43,6 +43,22 @@ function isClaimed(el: Element): boolean {
   return false;
 }
 
+/** Link rels where a page normally has one of each (per sizes/media), whatever the href. */
+const SINGLE_RELS = new Set(['icon', 'shortcut icon', 'apple-touch-icon', 'mask-icon', 'manifest']);
+
+function resolvedHref(el: Element): string | null {
+  const href = el.getAttribute('href');
+  if (href === null) {
+    return null;
+  }
+  const doc = el.ownerDocument;
+  try {
+    return new URL(href, doc?.baseURI || doc?.location?.href || undefined).href;
+  } catch {
+    return href;
+  }
+}
+
 /** True when an unmarked element has the identity of the desired tag. */
 function matches(el: Element, tag: HeadTag): boolean {
   if (tagName(el) !== tag.tag) {
@@ -68,7 +84,10 @@ function matches(el: Element, tag: HeadTag): boolean {
     if (a['rel'] === 'alternate' && a['hreflang'] !== undefined) {
       return el.getAttribute('hreflang') === a['hreflang'];
     }
-    return el.getAttribute('href') === a['href'];
+    if (SINGLE_RELS.has((a['rel'] ?? '').toLowerCase())) {
+      return el.getAttribute('sizes') === (a['sizes'] ?? null) && el.getAttribute('media') === (a['media'] ?? null);
+    }
+    return el.getAttribute('href') === a['href'] || resolvedHref(el) === a['href'];
   }
   return false;
 }

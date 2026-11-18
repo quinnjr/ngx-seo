@@ -54,6 +54,17 @@ class TagList {
 
   private overridden = new Set<string>();
 
+  /** Sets the tag with this key, replacing it in place if it exists. */
+  replace(key: string, tag: HeadTag['tag'], attrs: Record<string, string>): void {
+    const existing = this.tags.find((item) => item.key === key);
+    if (existing !== undefined) {
+      existing.tag = tag;
+      existing.attrs = attrs;
+      return;
+    }
+    this.add(key, tag, attrs);
+  }
+
   checkpoint(): { length: number; counts: Map<string, number>; overridden: Set<string>; attrs: HeadTag[] } {
     return {
       length: this.tags.length,
@@ -128,7 +139,11 @@ function rootRelative(value: string, origin: string | null): string {
 }
 
 function resolveJsonLd(value: unknown, pageUrl: string | null, origin: string | null, ancestors: Set<object>): unknown {
-  if (value === null || typeof value !== 'object' || value instanceof Date) {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  // Dates, URLs and anything else that serialises itself are passed through.
+  if (!Array.isArray(value) && typeof (value as { toJSON?: unknown }).toJSON === 'function') {
     return value;
   }
   if (ancestors.has(value)) {
@@ -188,6 +203,25 @@ const URL_META = new Set([
   'twitter:image:src',
   'twitter:player',
 ]);
+
+/**
+ * Checks the URL in a `refresh` meta value (`"5; url=/next"`). Returns the
+ * value with an absolute URL, the delay alone when there is no URL, or null
+ * when the URL is unusable.
+ */
+function refreshContent(content: string, check: (target: string) => string | null): string | null {
+  const match = /^\s*(\d+)\s*(?:[;,]\s*(?:url\s*=\s*)?(.*))?$/i.exec(content);
+  if (match === null) {
+    return null;
+  }
+  const delay = match[1];
+  const target = (match[2] ?? '').trim().replace(/^(['"])(.*)\1$/, '$2');
+  if (target === '') {
+    return delay;
+  }
+  const checked = check(target);
+  return checked === null ? null : `${delay}; url=${checked}`;
+}
 
 function isObject(value: unknown): value is Bag {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -292,7 +326,10 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     keepQueryParams: site.canonical?.keepQueryParams ?? [],
   } as const;
   const canonical = guarded<string | null>(() => {
-    const canonicalLink = objects<SeoLinkTag>(merged.links).find((link) => link.rel === 'canonical' && str(link.href));
+    // The last canonical link declared wins, matching the tag that is emitted.
+    const canonicalLink = objects<SeoLinkTag>(merged.links)
+      .filter((link) => link.rel === 'canonical' && str(link.href))
+      .pop();
     const fromLink = canonicalLink ? absoluteUrl(canonicalLink.href, origin) : null;
     if (fromLink !== null) {
       // An extra canonical link overrides the derived canonical everywhere, og:url included.
@@ -377,7 +414,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     list.property('og:description', str(og.description) ?? description);
     const derivedType = isObject(og.article) ? 'article' : isObject(og.profile) ? 'profile' : isObject(og.book) ? 'book' : 'website';
     list.property('og:type', str(og.type) ?? derivedType);
-    list.property('og:url', og.url ? url(og.url, 'openGraph.url') : canonical);
+    list.property('og:url', (og.url ? url(og.url, 'openGraph.url') : null) ?? canonical);
     list.property('og:site_name', str(og.siteName) ?? site.siteName);
     list.property('og:locale', str(og.locale));
     for (const locale of items<string>(og.alternateLocales)) {
@@ -470,14 +507,15 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   // Twitter
   section(() => {
     const tw: TwitterConfig = isObject(merged.twitter) ? merged.twitter : {};
-    const twitterImage = tw.image ? url(tw.image, 'twitter.image') : (images[0]?.url ?? null);
+    const explicitImage = tw.image ? url(tw.image, 'twitter.image') : null;
+    const twitterImage = explicitImage ?? images[0]?.url ?? null;
     list.name('twitter:card', str(tw.card) ?? (twitterImage ? 'summary_large_image' : 'summary'));
     list.name('twitter:site', str(tw.site));
     list.name('twitter:creator', str(tw.creator));
     list.name('twitter:title', str(tw.title) ?? str(og.title) ?? socialTitle);
     list.name('twitter:description', str(tw.description) ?? str(og.description) ?? description);
     list.name('twitter:image', twitterImage);
-    list.name('twitter:image:alt', str(tw.imageAlt) ?? (tw.image ? undefined : str(images[0]?.alt)));
+    list.name('twitter:image:alt', str(tw.imageAlt) ?? (explicitImage ? undefined : str(images[0]?.alt)));
   });
 
   // Extra meta
@@ -487,6 +525,13 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       const identity = str(meta.name) ?? str(meta.property);
       if (content === undefined) {
         return;
+      }
+      if (str(meta.httpEquiv)?.toLowerCase() === 'refresh') {
+        const checked = refreshContent(content, (target) => url(target, `meta[${index}]`));
+        if (checked === null) {
+          return;
+        }
+        content = checked;
       }
       if (identity !== undefined && URL_META.has(identity)) {
         const checked = url(content, `meta[${index}]`);
@@ -529,7 +574,11 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       } else if (rel === 'alternate' && attrs['hreflang']) {
         key = `link:alternate:${attrs['hreflang']}`;
       }
-      list.override(key, 'link', attrs);
+      if (rel === 'canonical' || key.startsWith('link:alternate:')) {
+        list.replace(key, 'link', attrs);
+      } else {
+        list.override(key, 'link', attrs);
+      }
     }
   });
 

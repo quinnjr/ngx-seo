@@ -429,4 +429,32 @@ describe('resolveHead', () => {
     expect(value(resolve({ openGraph: { book: { isbn: '1' } } }), 'meta:property:og:type')).toBe('book');
     expect(value(resolve({ openGraph: { type: 'website', article: { section: 'x' } } }), 'meta:property:og:type')).toBe('website');
   });
+
+  it('falls back to the canonical and og:image when explicit og:url or twitter:image is unusable', () => {
+    const head = resolve({ image: '/a.png', openGraph: { url: 'javascript:x' }, twitter: { image: 'javascript:y' } });
+    expect(value(head, 'meta:property:og:url')).toBe('https://x.test/page');
+    expect(value(head, 'meta:name:twitter:image')).toBe('https://x.test/a.png');
+  });
+
+  it('serialises URL and other toJSON objects inside JSON-LD', () => {
+    const head = resolve({ jsonLd: [{ '@type': 'Thing', url: new URL('https://a.test/x') as never, sameAs: [new URL('https://b.test/') as never] }] });
+    const node = JSON.parse(head.tags.find((t) => t.key === 'script:jsonld')?.text as string)['@graph'][0];
+    expect(node.url).toBe('https://a.test/x');
+    expect(node.sameAs).toEqual(['https://b.test/']);
+  });
+
+  it('checks the URL inside a refresh meta tag', () => {
+    expect(value(resolve({ meta: [{ httpEquiv: 'refresh', content: '0;url=javascript:alert(1)' }] }), 'meta:http-equiv:refresh')).toBeUndefined();
+    expect(value(resolve({ meta: [{ httpEquiv: 'refresh', content: '5; URL=/next' }] }), 'meta:http-equiv:refresh')).toBe(
+      '5; url=https://x.test/next',
+    );
+    expect(value(resolve({ meta: [{ httpEquiv: 'refresh', content: '30' }] }), 'meta:http-equiv:refresh')).toBe('30');
+  });
+
+  it('emits exactly one canonical link, the last one declared', () => {
+    const head = resolve({ links: [{ rel: 'canonical', href: '/one' }, { rel: 'canonical', href: '/two' }] });
+    expect(keys(head).filter((k) => k.startsWith('link:canonical'))).toEqual(['link:canonical']);
+    expect(head.canonical).toBe('https://x.test/two');
+    expect(value(head, 'meta:property:og:url')).toBe('https://x.test/two');
+  });
 });

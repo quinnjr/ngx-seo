@@ -17,9 +17,25 @@ const KEYED_LISTS: Record<string, KeyFn> = {
   jsonLd: (item) => text(item['@id']),
   alternates: (item) => text(item['hreflang']),
   meta: (item) => text(item['key']) ?? text(item['name']) ?? text(item['property']) ?? text(item['httpEquiv']),
-  links: (item) => text(item['key']) ?? `${String(item['rel'])}|${String(item['href'])}`,
+  links: (item) => text(item['key']) ?? linkKey(item),
   'openGraph.images': (item) => text(item['url']),
 };
+
+/**
+ * The merge key of a link without an explicit `key`: `canonical` for the
+ * single canonical link, `alternate|<hreflang>` for language alternates,
+ * otherwise `<rel>|<href as written>`.
+ */
+function linkKey(item: Bag): string {
+  const rel = String(item['rel']);
+  if (rel === 'canonical') {
+    return 'canonical';
+  }
+  if (rel === 'alternate' && text(item['hreflang'])) {
+    return `alternate|${String(item['hreflang'])}`;
+  }
+  return `${rel}|${String(item['href'])}`;
+}
 
 /** Keyed lists where higher layers come first. */
 const HIGHER_FIRST = new Set(['openGraph.images']);
@@ -35,11 +51,29 @@ function safeEntries(value: Bag): [string, unknown][] {
 }
 
 function isPlainObject(value: unknown): value is Bag {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || value === Object.prototype) {
     return false;
   }
   const proto: unknown = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
+}
+
+/**
+ * A class instance (a DTO, say) read as a plain object of its own fields.
+ * Dates and other built-ins with meaning beyond their fields are left alone.
+ */
+function asPlain(value: unknown): unknown {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    isPlainObject(value) ||
+    value instanceof Date ||
+    typeof (value as { toJSON?: unknown }).toJSON === 'function'
+  ) {
+    return value;
+  }
+  return { ...(value as Bag) };
 }
 
 function isRemoval(value: unknown): value is SeoRemoval {
@@ -122,10 +156,15 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
 }
 
 function mergeObject(target: Bag, source: Bag, path: string): void {
-  for (const [rawKey, value] of safeEntries(source)) {
+  for (const [rawKey, rawValue] of safeEntries(source)) {
     // Header names are case-insensitive, so a null can remove any casing.
     const key = path === 'http.headers' ? rawKey.toLowerCase() : rawKey;
+    // Checked again after normalisation: "__PROTO__" must not become "__proto__".
+    if (UNSAFE_KEYS.has(key)) {
+      continue;
+    }
     const here = path === '' ? key : `${path}.${key}`;
+    const value = asPlain(rawValue);
 
     if (value === undefined || value === '') {
       continue;
@@ -150,7 +189,7 @@ function mergeObject(target: Bag, source: Bag, path: string): void {
       continue;
     }
     if (isPlainObject(value) && !ATOMIC_OBJECTS.has(here)) {
-      const existing = target[key];
+      const existing = Object.hasOwn(target, key) ? target[key] : undefined;
       // An object never merges into a non-object (e.g. a raw robots string): it replaces it.
       const base: Bag = isPlainObject(existing) ? existing : {};
       if (!isPlainObject(existing)) {
@@ -170,8 +209,9 @@ function mergeObject(target: Bag, source: Bag, path: string): void {
 export function mergeLayers(layers: readonly SeoConfig[]): SeoConfig {
   const result: Bag = {};
   for (const layer of layers) {
-    if (isPlainObject(layer)) {
-      mergeObject(result, layer, '');
+    const plain = asPlain(layer);
+    if (isPlainObject(plain)) {
+      mergeObject(result, plain, '');
     }
   }
   return result as SeoConfig;

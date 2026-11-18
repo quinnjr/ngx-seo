@@ -2,7 +2,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Component, ErrorHandler, InjectionToken, inject, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { APP_BASE_HREF } from '@angular/common';
-import { ActivatedRouteSnapshot, RouterStateSnapshot, Routes, TitleStrategy, provideRouter } from '@angular/router';
+import {
+  ActivatedRouteSnapshot,
+  BaseRouteReuseStrategy,
+  DetachedRouteHandle,
+  RouteReuseStrategy,
+  RouterStateSnapshot,
+  Routes,
+  TitleStrategy,
+  provideRouter,
+} from '@angular/router';
+import { injectSeo } from '../src/lib/inject-seo';
+import { HeadReconciler } from '../src/lib/reconciler';
 import { Injectable } from '@angular/core';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { provideSeo } from '../src/lib/provide-seo';
@@ -222,26 +233,81 @@ describe('route errors', () => {
   });
 
   it('does not carry the previous page tags over when the next page fails to resolve', async () => {
-    const { go } = await setup(
-      [
-        { path: 'a', component: Page, data: { seo: { title: 'A', description: 'About A', robots: { index: false } } } },
-        { path: 'b', component: Page, data: { seo: { title: 'B' } } },
-      ],
-      {
-        baseUrl: 'https://x.test',
-        titleTemplate: (title: string) => {
-          if (title === 'B') {
-            throw new Error('bad template');
-          }
-          return title;
-        },
-      },
-    );
+    const broken: Record<string, unknown> = {};
+    Object.defineProperty(broken, 'title', { enumerable: true, get: () => { throw new Error('unreadable layer'); } });
+    const { go, errors } = await setup([
+      { path: 'a', component: Page, data: { seo: { title: 'A', description: 'About A', robots: { index: false } } } },
+      { path: 'b', component: Page, data: { seo: broken } },
+    ]);
     await go('/a');
     expect(meta('robots')).toBe('noindex');
     await go('/b');
     expect(meta('robots')).toBeNull();
     expect(meta('description')).toBeNull();
     expect(canonical()).toBe('https://x.test/b');
+    expect(errors).toHaveBeenCalled();
   });
 });
+
+describe('route lifecycle', () => {
+  beforeEach(() => {
+    document.head.innerHTML = '<title>Initial</title>';
+  });
+
+  @Component({ selector: 'seo-kept', template: '' })
+  class Kept {
+    readonly seo = injectSeo({ title: 'A title', description: 'A desc', robots: { index: false } });
+  }
+
+  class KeepA extends BaseRouteReuseStrategy {
+    private stored: DetachedRouteHandle | null = null;
+    override shouldDetach(route: ActivatedRouteSnapshot): boolean {
+      return route.routeConfig?.path === 'a';
+    }
+    override store(_route: ActivatedRouteSnapshot, handle: DetachedRouteHandle | null): void {
+      this.stored = handle;
+    }
+    override shouldAttach(route: ActivatedRouteSnapshot): boolean {
+      return route.routeConfig?.path === 'a' && this.stored !== null;
+    }
+    override retrieve(route: ActivatedRouteSnapshot): DetachedRouteHandle | null {
+      return route.routeConfig?.path === 'a' ? this.stored : null;
+    }
+  }
+
+  it('drops contributions from a detached route and restores them when it is reattached', async () => {
+    const { go } = await setup(
+      [
+        { path: 'a', component: Kept },
+        { path: 'b', component: Page, data: { seo: { title: 'B title' } } },
+      ],
+      undefined,
+      [{ provide: RouteReuseStrategy, useClass: KeepA }],
+    );
+    await go('/a');
+    expect(document.title).toBe('A title | S');
+    await go('/b');
+    expect(document.title).toBe('B title | S');
+    expect(meta('robots')).toBeNull();
+    expect(meta('description')).toBeNull();
+    await go('/a');
+    expect(document.title).toBe('A title | S');
+    expect(meta('robots')).toBe('noindex');
+  });
+
+  it('moves straight from one page to the next without an intermediate head', async () => {
+    const { go } = await setup([
+      { path: 'a', component: Kept },
+      { path: 'b', component: Page, data: { seo: { title: 'B title', description: 'B desc' } } },
+    ]);
+    await go('/a');
+    const applied: (string | null)[] = [];
+    const spy = vi.spyOn(HeadReconciler.prototype, 'apply').mockImplementation(function (this: HeadReconciler, head) {
+      applied.push(head.title);
+    });
+    await go('/b');
+    spy.mockRestore();
+    expect(applied).toEqual(['B title | S']);
+  });
+});
+

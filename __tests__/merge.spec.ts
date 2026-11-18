@@ -284,4 +284,34 @@ describe('mergeLayers', () => {
     }
     expect(mergeLayers([{ jsonLd: [new Node() as never] }]).jsonLd).toEqual([{ '@type': 'Thing', name: 'n' }]);
   });
+
+  it('never writes through a __proto__ key that only appears after header-name normalisation', () => {
+    mergeLayers([JSON.parse('{"http":{"headers":{"__PROTO__":{"polluted":"yes"},"Constructor":{"x":1}}}}')]);
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+    expect(Object.prototype).not.toHaveProperty('polluted');
+  });
+
+  it('keeps one canonical link: the higher layer wins', () => {
+    const merged = mergeLayers([
+      { links: [{ rel: 'canonical', href: '/route-choice' }, { rel: 'alternate', hreflang: 'fr', href: '/fr-a' }] },
+      { links: [{ rel: 'canonical', href: '/component-choice' }, { rel: 'alternate', hreflang: 'fr', href: '/fr-b' }] },
+    ]);
+    expect(merged.links).toEqual([
+      { rel: 'canonical', href: '/component-choice' },
+      { rel: 'alternate', hreflang: 'fr', href: '/fr-b' },
+    ]);
+  });
+
+  it('reads class-instance layers and nested objects', () => {
+    class Dto {
+      title = 'From class';
+      description = 'D';
+    }
+    class Og {
+      title = 'OG';
+    }
+    expect(mergeLayers([new Dto() as never])).toEqual({ title: 'From class', description: 'D' });
+    const merged = mergeLayers([{ openGraph: new Og() as never }, { openGraph: { description: 'x' } }]);
+    expect(merged.openGraph).toEqual({ title: 'OG', description: 'x' });
+  });
 });

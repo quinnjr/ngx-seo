@@ -84,8 +84,10 @@ removed when none does. Put site-wide values in `defaults` instead.
 
 Everything else in `<head>`, such as `viewport`, stylesheets and your own
 scripts, is never touched unless a layer overrides it through `meta` or
-`links`. An `index.html` tag taken over that way (for example `theme-color`)
-gets its original attributes back once no page overrides it.
+`links`. An `index.html` tag taken over that way gets its original attributes
+back once no page overrides it. Examples: `theme-color`; an icon,
+`apple-touch-icon` or manifest link with the same `sizes`/`media`; any other
+link with the same `rel` and `href`.
 
 ## Declaring SEO
 
@@ -158,7 +160,12 @@ export class FaqSectionComponent {
 | `destroy()` | Remove it. Later calls do nothing. |
 
 Outside an injection context, use the service:
-`inject(Seo).contribute(config, { priority, destroyRef })`.
+`inject(Seo).contribute(config, { priority, destroyRef, route })`.
+
+A contribution from `injectSeo` belongs to the component's route. It applies
+only while that route is attached, so a page kept alive by a
+`RouteReuseStrategy` stops contributing when you navigate away, and
+contributes again when it is reattached.
 `inject(Seo).resolved` is a signal of the fully derived head, useful for
 tests or a preview panel.
 
@@ -178,7 +185,7 @@ Merge rules:
 | `undefined` or `''` | No opinion. |
 | `null` | Remove what lower layers set. Works at any depth. |
 | Objects (`openGraph`, `twitter`, `robots`, `bots`, `http`) | Merged field by field. A raw-string `robots` replaces the whole object. |
-| Keyed lists | Items from all layers are combined; items with the same key collapse to the higher layer. Keys: `jsonLd` by `@id`, `alternates` by `hreflang`, `meta` by `key` / `name` / `property` / `httpEquiv`, `links` by `key` / `rel`+`href`, `openGraph.images` by `url`. Items without a key are all kept. |
+| Keyed lists | Items from all layers are combined; items with the same key collapse to the higher layer. Items without a key are all kept. See the key table below. |
 | Plain lists (`keywords`, `article.tags`, …) | The highest layer that sets the list replaces it. |
 
 Keyed lists come out lowest layer first, except `openGraph.images`, where
@@ -190,6 +197,19 @@ To drop one inherited item, put `removeItem(key)` in the list:
 ```ts
 jsonLd: [removeItem('/#org')]
 ```
+
+Item keys, as written in your config (before URLs are made absolute):
+
+| List | Key |
+|---|---|
+| `jsonLd` | the node's `@id` |
+| `alternates` | `hreflang` |
+| `meta` | `key`, else `name`, `property` or `httpEquiv` |
+| `links` | `key`, else `canonical` for the canonical link, `alternate\|<hreflang>` for a language alternate, otherwise `<rel>\|<href>` |
+| `openGraph.images` | `url` |
+
+For example, `links: [removeItem('preconnect|https://cdn.test')]` or
+`links: [removeItem('canonical')]`.
 
 ## Derivation
 

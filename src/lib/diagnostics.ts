@@ -22,8 +22,15 @@ export function diagnose(head: ResolvedHead, layers: readonly SeoConfig[], curre
   }
   for (const layer of layers) {
     const seen = new Set<string>();
-    for (const node of layer.jsonLd ?? []) {
-      const id = '@id' in node ? node['@id'] : undefined;
+    const nodes: unknown = layer?.jsonLd;
+    if (!Array.isArray(nodes)) {
+      continue;
+    }
+    for (const node of nodes) {
+      if (node === null || typeof node !== 'object') {
+        continue;
+      }
+      const id = (node as Record<string, unknown>)['@id'];
       if (typeof id !== 'string') {
         continue;
       }

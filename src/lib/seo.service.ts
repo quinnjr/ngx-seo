@@ -24,6 +24,7 @@ import {
   NavigationError,
   NavigationSkipped,
   ROUTES,
+  type ActivatedRoute,
   Router,
   TitleStrategy,
 } from '@angular/router';
@@ -43,11 +44,18 @@ export interface ContributeOptions {
   priority?: number;
   /** Removes the contribution when this is destroyed. */
   destroyRef?: DestroyRef;
+  /**
+   * The route the contribution belongs to. It only applies while that route is
+   * attached, so a page kept alive by a `RouteReuseStrategy` stops
+   * contributing once you navigate away. `injectSeo` sets this for you.
+   */
+  route?: ActivatedRoute | null;
 }
 
 type Source = SeoConfig | (() => SeoConfig);
 
 interface Contribution {
+  readonly route: ActivatedRoute | null;
   readonly priority: number;
   readonly order: number;
   readonly value: Signal<SeoConfig>;
@@ -104,6 +112,8 @@ export class Seo {
   private readonly routeLayers = signal<readonly SeoConfig[]>([]);
   private readonly path = signal<string>(this.initialPath());
   private readonly contributions = signal<readonly Contribution[]>([]);
+  /** Routes currently attached to the router state; null when no router is tracked. */
+  private readonly attached = signal<ReadonlySet<ActivatedRoute> | null>(null);
   private nextOrder = 0;
   /** Depth of reactive computation; errors raised inside are delivered after it. */
   private computing = 0;
@@ -144,7 +154,7 @@ export class Seo {
         }
         this.writeResponse(head);
         if (this.diagnostics && this.ready && (!this.routed || this.router?.navigated === true)) {
-          this.warn(head);
+          this.warnSafely(head);
         }
       });
     });
@@ -198,7 +208,12 @@ export class Seo {
       }
       return { ...base, ...patches() };
     });
-    const contribution: Contribution = { priority: options.priority ?? 0, order: this.nextOrder++, value };
+    const contribution: Contribution = {
+      route: options.route ?? null,
+      priority: options.priority ?? 0,
+      order: this.nextOrder++,
+      value,
+    };
     this.contributions.update((list) => [...list, contribution]);
 
     const handle: SeoHandle = {
@@ -261,7 +276,7 @@ export class Seo {
       this.flushErrors();
       this.reconcile(head);
       if (this.diagnostics && (!this.routed || router?.navigated === true)) {
-        this.warn(head);
+        this.warnSafely(head);
       }
     }
   }
@@ -273,7 +288,19 @@ export class Seo {
     }
     const injector = inject(EnvironmentInjector);
     const key = this.site.routeDataKey ?? 'seo';
+    const trackAttached = (): void => {
+      const routes = new Set<ActivatedRoute>();
+      const visit = (route: ActivatedRoute): void => {
+        routes.add(route);
+        for (const child of route.children) {
+          visit(child);
+        }
+      };
+      visit(router.routerState.root);
+      this.attached.set(routes);
+    };
     const sync = (): void => {
+      trackAttached();
       this.path.set(this.withBasePath(router.url));
       this.routeLayers.set(
         collectRouteLayers(router.routerState.snapshot.root, key, injector, (error) => this.report(error), this.ownsTitles),
@@ -287,11 +314,15 @@ export class Seo {
     inject(DestroyRef).onDestroy(() => subscription.unsubscribe());
     if (router.navigated) {
       sync();
+    } else {
+      trackAttached();
     }
   }
 
   private compute(): ResolvedHead {
-    const contributions = [...this.contributions()]
+    const attached = this.attached();
+    const contributions = this.contributions()
+      .filter((item) => item.route === null || attached === null || attached.has(item.route))
       .sort((a, b) => a.priority - b.priority || a.order - b.order)
       .map((item) => item.value());
     const layers: SeoConfig[] = [...this.routeLayers(), ...contributions];
@@ -326,6 +357,14 @@ export class Seo {
     } catch (error) {
       this.report(error);
       return {};
+    }
+  }
+
+  private warnSafely(head: ResolvedHead): void {
+    try {
+      this.warn(head);
+    } catch (error) {
+      this.report(error);
     }
   }
 

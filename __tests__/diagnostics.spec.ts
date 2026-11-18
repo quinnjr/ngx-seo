@@ -112,4 +112,12 @@ describe('diagnostics in the Seo service', () => {
     await new Promise((resolve) => setTimeout(resolve));
     expect(warn.mock.calls.some((call: unknown[]) => String(call[0]).includes('title'))).toBe(true);
   });
+
+  it('survives malformed jsonLd from an untyped layer', () => {
+    const seo = boot(site);
+    seo.contribute(JSON.parse('{"title":"T","description":"D","jsonLd":[null, "x", {"@id": 1}]}'));
+    seo.contribute(JSON.parse('{"jsonLd":{"@type":"Thing"}}'));
+    expect(() => TestBed.tick()).not.toThrow();
+    expect(document.title).toBe('T');
+  });
 });
