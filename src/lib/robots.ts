@@ -1,7 +1,10 @@
 import type { RobotsDirectives } from './types';
 
-function dateText(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : value;
+function dateText(value: Date | string): string | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
 }
 
 /** Renders robots directives as meta content. Returns null when nothing is set. */
@@ -32,8 +35,9 @@ export function robotsContent(robots: RobotsDirectives | string): string | null 
   if (typeof robots.maxVideoPreview === 'number') {
     parts.push(`max-video-preview:${robots.maxVideoPreview}`);
   }
-  if (robots.unavailableAfter) {
-    parts.push(`unavailable_after:${dateText(robots.unavailableAfter)}`);
+  const unavailableAfter = robots.unavailableAfter ? dateText(robots.unavailableAfter) : null;
+  if (unavailableAfter !== null) {
+    parts.push(`unavailable_after:${unavailableAfter}`);
   }
 
   return parts.length === 0 ? null : parts.join(', ');

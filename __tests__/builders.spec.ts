@@ -159,4 +159,10 @@ describe('JSON-LD builders', () => {
     expect(organization({ name: 'x', foundingDate: '2020' })).toEqual({ '@type': 'Organization', name: 'x', foundingDate: '2020' });
     expect(webPage({ '@type': 'AboutPage', name: 'About' })['@type']).toBe('AboutPage');
   });
+
+  it('aggregateOffer ignores offers without a usable price', () => {
+    const node = aggregateOffer({ offers: [offer({ price: null as never }), offer({ price: '' }), offer({ price: '5' }), offer({ price: 'free' })] });
+    expect(node['lowPrice']).toBe('5');
+    expect(node['highPrice']).toBe('5');
+  });
 });

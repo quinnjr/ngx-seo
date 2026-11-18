@@ -1,3 +1,5 @@
+import type { ActivatedRouteSnapshot } from '@angular/router';
+
 /** Marks one inherited keyed-list item for removal. Create with `removeItem(key)`. */
 export interface SeoRemoval {
   $remove: string;
@@ -92,14 +94,17 @@ export interface SeoAlternate {
   href: string;
 }
 
-export interface SeoMetaTag {
-  name?: string;
-  property?: string;
-  httpEquiv?: string;
+interface SeoMetaBase {
   content: string;
   /** Identity for merging. Defaults to the name / property / httpEquiv value. */
   key?: string;
 }
+
+/** An extra meta tag, identified by exactly one of `name`, `property` or `httpEquiv`. */
+export type SeoMetaTag =
+  | (SeoMetaBase & { name: string; property?: never; httpEquiv?: never })
+  | (SeoMetaBase & { property: string; name?: never; httpEquiv?: never })
+  | (SeoMetaBase & { httpEquiv: string; name?: never; property?: never });
 
 export interface SeoLinkTag {
   rel: string;
@@ -184,7 +189,7 @@ export interface SeoSiteConfig {
 }
 
 /** A route data value: a config, or a function called in an injection context. */
-export type RouteSeo<TRoute = unknown> = SeoConfig | ((route: TRoute) => SeoConfig);
+export type RouteSeo<TRoute = ActivatedRouteSnapshot> = SeoConfig | ((route: TRoute) => SeoConfig);
 
 export interface HeadTag {
   key: string;

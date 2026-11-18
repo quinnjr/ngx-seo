@@ -358,4 +358,75 @@ describe('resolveHead', () => {
   it('emits only the always-derived tags for an empty config with no base', () => {
     expect(keys(resolveHead({}, {}, env))).toEqual(['meta:property:og:type', 'meta:name:twitter:card']);
   });
+
+  describe('malformed input from untyped sources', () => {
+    const loose = (config: Record<string, unknown>): ResolvedHead => resolve(config as SeoConfig);
+
+    it('drops an invalid unavailableAfter date without losing the rest of the head', () => {
+      const head = loose({ title: 'T', robots: { index: false, unavailableAfter: new Date('x') } });
+      expect(head.title).toBe('T');
+      expect(value(head, 'meta:name:robots')).toBe('noindex');
+    });
+
+    it('ignores list fields that are not lists', () => {
+      const head = loose({ title: 'T', openGraph: { videos: { url: '/v.mp4' }, audio: 'x' }, alternates: 'fr', meta: {}, links: 1, jsonLd: {} });
+      expect(head.title).toBe('T');
+      expect(keys(head).some((k) => k.includes('og:video'))).toBe(false);
+    });
+
+    it('treats a single string as a one-item list', () => {
+      const head = loose({ openGraph: { alternateLocales: 'en_GB', article: { tags: 'news', authors: 'Ann' } } });
+      expect(head.tags.filter((t) => t.attrs['property'] === 'og:locale:alternate').map((t) => t.attrs['content'])).toEqual(['en_GB']);
+      expect(head.tags.filter((t) => t.attrs['property'] === 'article:tag').map((t) => t.attrs['content'])).toEqual(['news']);
+      expect(head.tags.filter((t) => t.attrs['property'] === 'article:author').map((t) => t.attrs['content'])).toEqual(['Ann']);
+    });
+
+    it('ignores bots that are not a map of crawlers', () => {
+      const head = loose({ bots: 'noindex' });
+      expect(head.tags.some((t) => /^\d+$/.test(t.attrs['name'] ?? ''))).toBe(false);
+    });
+
+    it('contains a throwing field to its own section and keeps the status', () => {
+      const onError = vi.fn();
+      const article = {};
+      Object.defineProperty(article, 'section', { enumerable: true, get: () => { throw new Error('boom'); } });
+      const head = resolveHead(
+        { title: 'T', description: 'D', openGraph: { article }, http: { status: 404 } } as SeoConfig,
+        site,
+        { path: '/p', origin: null, onError },
+      );
+      expect(head.title).toBe('T');
+      expect(value(head, 'meta:name:description')).toBe('D');
+      expect(value(head, 'meta:name:twitter:title')).toBe('T');
+      expect(head.http.status).toBe(404);
+      expect(onError).toHaveBeenCalled();
+    });
+
+    it('reports a JSON-LD node without @type', () => {
+      const onError = vi.fn();
+      resolveHead({ jsonLd: [{ name: 'x' } as never] }, site, { path: '/', origin: null, onError });
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('checks URLs in extra meta that override URL-valued tags', () => {
+    const head = resolve({
+      meta: [
+        { property: 'og:url', content: 'javascript:alert(1)' },
+        { property: 'og:image', content: '/x.png' },
+        { name: 'twitter:image', content: 'data:x' },
+      ],
+    });
+    expect(value(head, 'meta:property:og:url')).toBe('https://x.test/page');
+    expect(value(head, 'meta:property:og:image')).toBe('https://x.test/x.png');
+    expect(value(head, 'meta:name:twitter:image')).toBeUndefined();
+    expect(head.droppedUrls.length).toBeGreaterThan(0);
+  });
+
+  it('derives og:type from article, profile or book data', () => {
+    expect(value(resolve({ openGraph: { article: { section: 'News' } } }), 'meta:property:og:type')).toBe('article');
+    expect(value(resolve({ openGraph: { profile: { username: 'ann' } } }), 'meta:property:og:type')).toBe('profile');
+    expect(value(resolve({ openGraph: { book: { isbn: '1' } } }), 'meta:property:og:type')).toBe('book');
+    expect(value(resolve({ openGraph: { type: 'website', article: { section: 'x' } } }), 'meta:property:og:type')).toBe('website');
+  });
 });

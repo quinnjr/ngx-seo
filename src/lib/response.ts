@@ -5,6 +5,11 @@ const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 /** Header value: visible Latin-1 and tabs/spaces, no CR, LF or NUL. */
 const HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/;
 
+/** Statuses a `Response` with an HTML body can be built with. */
+function isUsableStatus(status: number): boolean {
+  return Number.isInteger(status) && status >= 200 && status <= 599 && status !== 204 && status !== 205 && status !== 304;
+}
+
 type HeaderStore = { headers?: HeadersInit };
 type Original = { name: string; value: string } | null;
 
@@ -33,8 +38,13 @@ export class ResponseWriter {
       return;
     }
 
-    if (http.status !== undefined) {
-      init.status = http.status;
+    let status = http.status;
+    if (status !== undefined && !isUsableStatus(status)) {
+      this.onError(new Error(`ngx-seo: ignored unusable response status ${String(status)}`));
+      status = undefined;
+    }
+    if (status !== undefined) {
+      init.status = status;
       this.wroteStatus = true;
     } else if (this.wroteStatus) {
       init.status = this.originalStatus;

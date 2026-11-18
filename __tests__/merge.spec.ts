@@ -73,7 +73,7 @@ describe('mergeLayers', () => {
         { http: { status: 200, headers: { 'X-A': '1', 'X-B': '2' } } },
         { http: { status: 404, headers: { 'X-B': null } } },
       ]);
-      expect(merged.http).toEqual({ status: 404, headers: { 'X-A': '1' } });
+      expect(merged.http).toEqual({ status: 404, headers: { 'x-a': '1' } });
     });
 
     it('merges robots directive objects', () => {
@@ -254,5 +254,34 @@ describe('mergeLayers', () => {
 
   it('returns an empty config for no layers', () => {
     expect(mergeLayers([])).toEqual({});
+  });
+
+  describe('hostile input', () => {
+    it('never writes through __proto__, constructor or prototype keys', () => {
+      const payload = JSON.parse(
+        '{"openGraph":{"__proto__":{"polluted":"yes"}},"http":{"headers":{"__proto__":{"polluted":"yes"}}},' +
+          '"twitter":{"constructor":{"prototype":{"polluted":"yes"}}},"robots":{"__proto__":{"index":false}}}',
+      );
+      const merged = mergeLayers([payload]);
+      expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+      expect(Object.prototype).not.toHaveProperty('polluted');
+      expect(merged.robots).toEqual({});
+    });
+  });
+
+  it('merges header names case-insensitively so null removes a differently cased header', () => {
+    const merged = mergeLayers([
+      { http: { headers: { 'X-Robots-Tag': 'noindex' } } },
+      { http: { headers: { 'x-robots-tag': null } } },
+    ]);
+    expect(merged.http?.headers).toEqual({});
+  });
+
+  it('accepts JSON-LD nodes that are class instances', () => {
+    class Node {
+      '@type' = 'Thing';
+      name = 'n';
+    }
+    expect(mergeLayers([{ jsonLd: [new Node() as never] }]).jsonLd).toEqual([{ '@type': 'Thing', name: 'n' }]);
   });
 });

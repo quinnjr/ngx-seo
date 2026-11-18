@@ -51,8 +51,9 @@ export function canonicalFor(
   if (origin === null) {
     return null;
   }
-  const url = parse(path, origin);
-  if (!url) {
+  // A leading "//" would otherwise be read as another host.
+  const url = parse(`/${path.replace(/^[/\\]+/, '')}`, origin);
+  if (!url || url.origin !== origin) {
     return null;
   }
 

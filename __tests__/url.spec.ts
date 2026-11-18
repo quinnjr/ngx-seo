@@ -54,4 +54,9 @@ describe('canonicalFor', () => {
   it('returns null without a base', () => {
     expect(canonicalFor('/a', null, { trailingSlash: 'preserve', keepQueryParams: [] })).toBeNull();
   });
+
+  it('never lets a path starting with // change the host', () => {
+    expect(canonicalFor('//evil.test/foo', base, { trailingSlash: 'preserve', keepQueryParams: [] })).toBe('https://x.test/evil.test/foo');
+    expect(canonicalFor('///evil.test', base, { trailingSlash: 'preserve', keepQueryParams: [] })).toBe('https://x.test/evil.test');
+  });
 });

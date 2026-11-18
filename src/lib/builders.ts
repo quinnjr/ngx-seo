@@ -209,7 +209,10 @@ export function aggregateOffer(
 
   let low: unknown = lowPrice;
   let high: unknown = highPrice;
-  const priced = children.filter((child) => Number.isFinite(Number(child['price'])) && child['price'] !== '');
+  const usable = (price: unknown): boolean =>
+    (typeof price === 'number' && Number.isFinite(price)) ||
+    (typeof price === 'string' && price.trim() !== '' && Number.isFinite(Number(price)));
+  const priced = children.filter((child) => usable(child['price']));
   if (priced.length > 0) {
     const byPrice = [...priced].sort((a, b) => Number(a['price']) - Number(b['price']));
     low ??= byPrice[0]['price'];

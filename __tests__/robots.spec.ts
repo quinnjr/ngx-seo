@@ -33,4 +33,8 @@ describe('robotsContent', () => {
     );
     expect(robotsContent({ unavailableAfter: '2027-01-01' })).toBe('unavailable_after:2027-01-01');
   });
+
+  it('skips an invalid unavailableAfter date', () => {
+    expect(robotsContent({ index: false, unavailableAfter: new Date('nope') })).toBe('noindex');
+  });
 });

@@ -27,6 +27,13 @@ const HIGHER_FIRST = new Set(['openGraph.images']);
 /** Values that are replaced whole instead of merged field by field. */
 const ATOMIC_OBJECTS = new Set(['image']);
 
+/** Keys that could reach an object's prototype; never copied. */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function safeEntries(value: Bag): [string, unknown][] {
+  return Object.entries(value).filter(([key]) => !UNSAFE_KEYS.has(key));
+}
+
 function isPlainObject(value: unknown): value is Bag {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return false;
@@ -56,7 +63,7 @@ function cloneValue(value: unknown, ancestors: Set<object> = new Set()): unknown
       out = value.map((item) => cloneValue(item, ancestors));
     } else {
       const copy: Bag = {};
-      for (const [key, inner] of Object.entries(value)) {
+      for (const [key, inner] of safeEntries(value)) {
         copy[key] = cloneValue(inner, ancestors);
       }
       out = copy;
@@ -68,7 +75,7 @@ function cloneValue(value: unknown, ancestors: Set<object> = new Set()): unknown
 }
 
 function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string): unknown[] {
-  const keyOf = KEYED_LISTS[path];
+  const keyOf = KEYED_LISTS[path] as KeyFn;
   const higherFirst = HIGHER_FIRST.has(path);
   const result = [...existing];
   const fresh: unknown[] = [];
@@ -84,11 +91,13 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
       }
       continue;
     }
-    if (!isPlainObject(item)) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
       continue;
     }
-    const copy = cloneValue(item);
-    const key = keyOf(item);
+    // Class instances (e.g. from a schema library) are copied as plain objects.
+    const plain: Bag = isPlainObject(item) ? item : { ...(item as Bag) };
+    const copy = cloneValue(plain);
+    const key = keyOf(plain);
     if (key === undefined) {
       fresh.push(copy);
       continue;
@@ -113,7 +122,9 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
 }
 
 function mergeObject(target: Bag, source: Bag, path: string): void {
-  for (const [key, value] of Object.entries(source)) {
+  for (const [rawKey, value] of safeEntries(source)) {
+    // Header names are case-insensitive, so a null can remove any casing.
+    const key = path === 'http.headers' ? rawKey.toLowerCase() : rawKey;
     const here = path === '' ? key : `${path}.${key}`;
 
     if (value === undefined || value === '') {
@@ -127,7 +138,7 @@ function mergeObject(target: Bag, source: Bag, path: string): void {
       delete target[key];
       continue;
     }
-    if (here in KEYED_LISTS) {
+    if (Object.hasOwn(KEYED_LISTS, here)) {
       if (Array.isArray(value)) {
         const existing = Array.isArray(target[key]) ? (target[key] as unknown[]) : [];
         target[key] = mergeKeyedList(existing, value, here);

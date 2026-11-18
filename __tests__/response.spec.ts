@@ -55,4 +55,17 @@ describe('ResponseWriter', () => {
     writer.write({ headers: {} });
     expect(init.status).toBe(200);
   });
+
+  it('rejects statuses a Response cannot be built with and keeps the original', () => {
+    for (const status of [Number.NaN, 0, 99, 199, 600, 999, 204, 205, 304, 404.5]) {
+      const init: ResponseInit = { status: 200 };
+      const onError = vi.fn();
+      new ResponseWriter(init, onError).write({ status, headers: {} });
+      expect(init.status, String(status)).toBe(200);
+      expect(onError, String(status)).toHaveBeenCalledTimes(1);
+    }
+    const init: ResponseInit = {};
+    new ResponseWriter(init, () => {}).write({ status: 410, headers: {} });
+    expect(init.status).toBe(410);
+  });
 });
