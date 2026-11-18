@@ -100,8 +100,8 @@ interface Contribution {
   readonly route: ActivatedRoute | Route | null;
   /** A non-root service injector, resolved to its route when evaluated. */
   readonly injector: EnvironmentInjector | null;
-  /** The deepest primary route when an injector-bound contribution was made. */
-  readonly fallbackRoute: ActivatedRoute | null;
+  /** The page component active when an injector-bound contribution was made. */
+  readonly fallbackComponent: unknown;
   readonly priority: number;
   readonly order: number;
   readonly value: Signal<SeoConfig>;
@@ -224,8 +224,8 @@ export class Seo {
   private readonly serverCopies = signal<ReadonlyMap<string, ServerCopy>>(new Map());
   /** Browser only: the server's creation order of every hosted contribution, so both sides rank alike. */
   private serverOrders = new Map<string, number>();
-  /** Browser only: unkeyed route-service contributions created so far per route key. */
-  private readonly liveRouteCounts = new Map<string, number>();
+  /** Browser only: route copies already continued by a live service. */
+  private readonly claimedRouteCopies = new Set<string>();
   /** Contributions made so far per route key, for route-bound copy ids. */
   private readonly routeSeq = new Map<string, number>();
   /** Browser only: how many contributions each host has claimed so far. */
@@ -400,7 +400,6 @@ export class Seo {
             hostId = `r:${key}#${seq}`;
           } else {
             hostId = this.claimRouteCopy(key, config);
-            this.settleRouteCopies(key, hostId);
             if (hostId === null && this.recordedRouteCopies(key).length > 0) {
               // Not matched to a server copy: rank above every server contribution,
               // so a leftover copy can never override this live one.
@@ -435,7 +434,7 @@ export class Seo {
       hostId,
       route: boundRoute,
       injector,
-      fallbackRoute: injector === null ? null : this.deepestPrimaryRoute(),
+      fallbackComponent: injector === null ? null : (this.deepestPrimaryRoute()?.component ?? null),
       priority: options.priority ?? 0,
       order: order ?? this.nextOrder++,
       value,
@@ -680,9 +679,18 @@ export class Seo {
         }
         current = (current as { parent?: unknown }).parent;
       }
-      // No route owns it (e.g. a module imported by a standalone page): follow
-      // the page that was active when the contribution was made.
-      return item.fallbackRoute === null || attached.has(item.fallbackRoute);
+      // No route owns it (e.g. a module imported by a standalone page): it
+      // applies wherever the page component that was active when it was made
+      // is shown, on every visit and on every route using that component.
+      if (item.fallbackComponent === null) {
+        return true;
+      }
+      for (const entry of attached) {
+        if ('snapshot' in entry && entry.component === item.fallbackComponent) {
+          return true;
+        }
+      }
+      return false;
     }
     return true;
   }
@@ -756,34 +764,10 @@ export class Seo {
     return [...this.serverOrders.keys()].filter((id) => id.startsWith(prefix) && !id.startsWith(`${prefix}k:`));
   }
 
-  /**
-   * Once the browser has as many unkeyed service contributions on a route as
-   * the server recorded, every one exists live: drop that route's leftover copies.
-   */
-  private settleRouteCopies(routeKey: string, claimed: string | null): void {
-    const live = (this.liveRouteCounts.get(routeKey) ?? 0) + 1;
-    this.liveRouteCounts.set(routeKey, live);
-    const recorded = this.recordedRouteCopies(routeKey);
-    if (recorded.length === 0 || live < recorded.length) {
-      return;
-    }
-    const leftovers = recorded.filter((id) => id !== claimed && untracked(this.serverCopies).has(id));
-    if (leftovers.length > 0) {
-      this.serverCopies.update((copies) => {
-        const next = new Map(copies);
-        for (const id of leftovers) {
-          next.delete(id);
-        }
-        return next;
-      });
-    }
-  }
-
   private claimRouteCopy(routeKey: string, config: SeoConfig | (() => SeoConfig)): string | null {
-    const recorded = this.recordedRouteCopies(routeKey);
-    if (recorded.length === 1) {
-      return recorded[0];
-    }
+    // A copy is continued at most once, and only by a service whose config matches it:
+    // a service the server never created must not take another service's copy.
+    const recorded = this.recordedRouteCopies(routeKey).filter((id) => !this.claimedRouteCopies.has(id));
     let value: string;
     try {
       value = JSON.stringify(typeof config === 'function' ? untracked(config) : config);
@@ -795,7 +779,11 @@ export class Seo {
       const copy = copies.get(id);
       return copy !== undefined && JSON.stringify(copy.config) === value;
     });
-    return matches.length === 1 ? matches[0] : null;
+    const claimed = matches.length === 1 ? matches[0] : null;
+    if (claimed !== null) {
+      this.claimedRouteCopies.add(claimed);
+    }
+    return claimed;
   }
 
   /** The route config at a key from `routeKey`. */

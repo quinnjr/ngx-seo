@@ -532,6 +532,26 @@ describe('route lifecycle', () => {
       await leaves([{ path: 'lazy', loadChildren: () => Promise.resolve(EagerModule) }], '/lazy');
     });
 
+    it('follows a standalone page that imports the service module, on every visit and route', async () => {
+      @NgModule({ providers: [DraftSeo] })
+      class SharedModule {}
+      @Component({ selector: 'seo-shared-page', imports: [SharedModule], template: '' })
+      class SharedPage {
+        readonly service = inject(DraftSeo);
+      }
+      const { go } = await setup([
+        { path: 'drafts', component: SharedPage },
+        { path: 'archive', component: SharedPage },
+        { path: 'home', component: Page },
+      ]);
+      const seen: (string | null)[] = [];
+      for (const url of ['/drafts', '/home', '/drafts', '/archive']) {
+        await go(url);
+        seen.push(meta('robots'));
+      }
+      expect(seen).toEqual(['noindex', null, 'noindex', 'noindex']);
+    });
+
     it('stops when the service comes from an NgModule imported by a standalone page', async () => {
       @NgModule({ providers: [DraftSeo] })
       class DraftModule {}

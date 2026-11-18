@@ -511,5 +511,42 @@ describe('incremental hydration', () => {
     appRef.destroy();
     destroyPlatform();
   });
-});
 
+  it('does not let a browser-only service take the single server copy of a route', async () => {
+    @Injectable()
+    class SvcA {
+      readonly seo = injectSeo({ description: 'a-desc' });
+    }
+    @Injectable()
+    class SvcB {
+      readonly seo = injectSeo({ keywords: ['b'] });
+    }
+    @Component({ selector: 'lazy-a2', template: '<p>a</p>' })
+    class LazyA2 {
+      readonly svc = inject(SvcA);
+    }
+    @Component({ selector: 'client-b2', template: '<p>b</p>' })
+    class ClientB2 {
+      readonly svc = inject(SvcB);
+    }
+    @Component({
+      selector: 'page-p2',
+      imports: [LazyA2, ClientB2],
+      template: '@defer (hydrate on interaction) { <lazy-a2 /> } @defer (on immediate) { <client-b2 /> }',
+    })
+    class PageP2 {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { parsed, appRef } = await hydrate(
+      App,
+      [{ path: 'p', component: PageP2, providers: [SvcA, SvcB], data: { seo: { description: 'route-desc' } } }],
+      '/p',
+      { baseUrl: 'https://x.test' } as typeof site,
+    );
+    expect(parsed.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('a-desc');
+    expect(document.head.querySelector('meta[name="keywords"]')?.getAttribute('content')).toBe('b');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+});

@@ -431,5 +431,13 @@ describe('mergeLayers', () => {
     const keyed = mergeLayers([{ meta: [{ key: 'A', name: 'a', content: '1' }] }, { meta: [{ key: 'a', name: 'b', content: '2' }] }]);
     expect(keyed.meta).toHaveLength(2);
   });
-});
 
+  it('lets a single alternates object beat a lower alternate link', () => {
+    const merged = mergeLayers([
+      { links: [{ rel: 'alternate', hreflang: 'de', href: '/de-old' }] },
+      { alternates: { hreflang: 'de', href: '/de-new' } as never },
+    ]);
+    expect(merged.links).toEqual([]);
+    expect(merged.alternates).toEqual([{ hreflang: 'de', href: '/de-new' }]);
+  });
+});

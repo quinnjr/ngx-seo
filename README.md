@@ -197,8 +197,9 @@ when you come back.
   this is what stops them leaking onto other pages. This holds even when the
   service is created while the route's injector is being built (an
   environment initializer, a lazy NgModule constructor).
-- **In a service from a module that a standalone page imports,** that is the
-  page that was active when the contribution was made.
+- **In a service from a module that a standalone page imports,** that is
+  every route showing the page component that was active when the
+  contribution was made.
 - **In a root service,** the contribution applies everywhere until it is
   destroyed.
 
@@ -374,12 +375,12 @@ page asks to override it any more.
       services (linked by the route).
     - **Several services on one route:** they may be created in a different
       order in the browser, so a service continues a server copy only when
-      the match is certain: the route has one copy, or one copy has the same
-      config. If a service's config can differ between server and browser,
+      the match is certain: exactly one unclaimed copy has the same config. If a service's config can differ between server and browser,
       give it a stable identity: `injectSeo(config, { key: 'product' })`.
       Without one, an unmatched live service still outranks every server
-      copy. Its own leftover copy goes once all the route's services exist
-      in the browser, or on the first client navigation.
+      copy, and its own leftover copy stays until the first client
+      navigation. Each copy is continued at most once, so a service that only
+      exists in the browser never takes another service's copy.
     - **Before the owner hydrates:** a component inside `@defer (hydrate …)`
       keeps contributing the server's copy, ranked in the server's order.
     - **After:** once it hydrates, its own contribution takes over.

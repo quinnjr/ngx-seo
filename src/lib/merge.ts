@@ -472,8 +472,9 @@ function releaseClaimedExtras(result: Bag, layer: Bag): void {
 
   if (Array.isArray(result['links'])) {
     const ownsCanonical = isSet(layer['canonical']);
+    const alternates = layer['alternates'];
     const hreflangs = new Set(
-      (Array.isArray(layer['alternates']) ? layer['alternates'] : [])
+      (isPlainObject(alternates) ? [alternates] : Array.isArray(alternates) ? alternates : [])
         .filter(isPlainObject)
         .map((item) => text(item['hreflang'])?.toLowerCase())
         .filter((value): value is string => value !== undefined),
