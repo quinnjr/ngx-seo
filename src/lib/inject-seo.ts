@@ -53,7 +53,8 @@ export function injectSeo(config: SeoConfig | (() => SeoConfig), options: Inject
   // Components belong to their own route. Services resolve ActivatedRoute to
   // the root route, so a service from a route's providers is bound to that
   // route's config instead (its injector is never destroyed).
-  const inComponent = inject(ElementRef, { optional: true }) !== null;
+  const host = inject(ElementRef, { optional: true });
+  const inComponent = host !== null;
   const route = inComponent
     ? inject(ActivatedRoute, { optional: true })
     : (routeConfigFor(
@@ -65,5 +66,6 @@ export function injectSeo(config: SeoConfig | (() => SeoConfig), options: Inject
     priority: options.priority,
     destroyRef: inject(DestroyRef),
     route,
+    host: host?.nativeElement instanceof Object ? (host.nativeElement as Element) : null,
   });
 }

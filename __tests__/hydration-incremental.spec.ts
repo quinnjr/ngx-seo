@@ -21,7 +21,7 @@ class FaqSection {
   // JIT cannot see signal inputs without metadata; AOT builds do not need this.
   @Input({ isSignal: true, alias: 'items', required: true } as never)
   readonly items = input.required<FaqItem[]>();
-  readonly seo = injectSeo(() => ({ jsonLd: [faqPage(this.items())] }));
+  readonly seo = injectSeo(() => ({ description: 'faq-desc', jsonLd: [faqPage(this.items())] }));
 }
 
 @Component({
@@ -40,7 +40,10 @@ const routes: Routes = [
   { path: 'faq', component: FaqPage, data: { seo: { title: 'FAQ', description: 'd' } } },
   { path: 'other', component: OtherPage, data: { seo: { title: 'Other' } } },
 ];
-const site = { baseUrl: 'https://x.test' };
+const site = {
+  baseUrl: 'https://x.test',
+  defaults: { description: 'site', jsonLd: [{ '@type': 'Organization', '@id': '/#org', name: 'O' }] },
+};
 const SHELL = '<!doctype html><html><head><title>Shell</title></head><body><app-root></app-root></body></html>';
 
 describe('incremental hydration', () => {
@@ -90,13 +93,17 @@ describe('incremental hydration', () => {
     await appRef.whenStable();
     await new Promise((resolve) => setTimeout(resolve, 50));
     appRef.tick();
-    expect(document.head.querySelector('script[type="application/ld+json"]')?.textContent).toContain('FAQPage');
+    const graph = document.head.querySelector('script[type="application/ld+json"]')?.textContent ?? '';
+    expect(graph).toContain('FAQPage');
+    expect(graph).toContain('Organization');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('faq-desc');
 
     await appRef.injector.get(Router).navigateByUrl('/other');
     await appRef.whenStable();
     appRef.tick();
     expect(document.title).toBe('Other');
-    expect(document.head.querySelector('script[type="application/ld+json"]')).toBeNull();
+    expect(document.head.querySelector('script[type="application/ld+json"]')?.textContent).not.toContain('FAQPage');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('site');
     errors.mockRestore();
     appRef.destroy();
     destroyPlatform();

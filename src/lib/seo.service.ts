@@ -7,6 +7,8 @@ import {
   Injectable,
   Injector,
   InjectionToken,
+  TransferState,
+  makeStateKey,
   PLATFORM_ID,
   REQUEST,
   RESPONSE_INIT,
@@ -56,11 +58,31 @@ export interface ContributeOptions {
    * contributing once you navigate away. `injectSeo` sets this for you.
    */
   route?: ActivatedRoute | Route | null;
+  /**
+   * The component host element. It carries the contribution across
+   * hydration: until the component hydrates in the browser, the server's copy
+   * of its SEO stands in for it. `injectSeo` sets this for you.
+   */
+  host?: Element | null;
 }
+
+/** Host attribute linking a server-rendered component to its server SEO copy. */
+export const SEO_HOST_ATTR = 'data-seo-c';
+
+interface ServerCopy {
+  id: string;
+  priority: number;
+  order: number;
+  config: SeoConfig;
+}
+
+/** Component contributions the server rendered, for the browser to use until they hydrate. */
+const SERVER_COPIES = makeStateKey<ServerCopy[]>('ngx-seo:contributions');
 
 type Source = SeoConfig | (() => SeoConfig);
 
 interface Contribution {
+  readonly hostId: string | null;
   readonly route: ActivatedRoute | Route | null;
   readonly priority: number;
   readonly order: number;
@@ -154,6 +176,13 @@ export class Seo {
   private notReady = false;
   /** NavigationEnd events seen; the second is the first client navigation. */
   private navigations = 0;
+  private nextHostId = 0;
+  private readonly transferState = inject(TransferState);
+  /**
+   * Browser only: server copies of component contributions whose components
+   * have not hydrated yet (for example inside `@defer (hydrate …)`).
+   */
+  private readonly serverCopies = signal<ReadonlyMap<string, ServerCopy>>(new Map());
   /** Depth of reactive computation; errors raised inside are delivered after it. */
   private computing = 0;
   private pendingErrors: unknown[] = [];
@@ -205,6 +234,7 @@ export class Seo {
           }
         }
         this.writeResponse(head);
+        this.writeServerCopies();
         if (this.diagnostics && this.ready && (!this.routed || this.router?.navigated === true)) {
           // Check after the render pass, so contributors created while rendering count.
           afterNextRender(() => this.warnSafely(untracked(this.resolved)), { injector: this.injector });
@@ -228,8 +258,11 @@ export class Seo {
       );
     }
     if (!this.ready) {
-      // Tags from @defer (hydrate …) blocks stay until the first client navigation.
-      this.reconciler.holdServerOnlyTags(true);
+      const copies = this.transferState.get(SERVER_COPIES, null);
+      this.transferState.remove(SERVER_COPIES);
+      if (Array.isArray(copies)) {
+        this.serverCopies.set(new Map(copies.map((copy) => [copy.id, copy])));
+      }
       void this.takeOverAfterHydration();
     }
   }
@@ -279,11 +312,36 @@ export class Seo {
       }
       return { ...base, ...patches() };
     });
+    let hostId: string | null = null;
+    const host = options.host ?? null;
+    if (host !== null) {
+      try {
+        if (isPlatformServer(this.platformId)) {
+          hostId = String(this.nextHostId++);
+          host.setAttribute(SEO_HOST_ATTR, hostId);
+        } else {
+          hostId = host.getAttribute(SEO_HOST_ATTR);
+          const claimed = hostId;
+          if (claimed !== null && untracked(this.serverCopies).has(claimed)) {
+            // The component has hydrated: its own contribution replaces the server copy.
+            this.serverCopies.update((copies) => {
+              const next = new Map(copies);
+              next.delete(claimed);
+              return next;
+            });
+          }
+        }
+      } catch (error) {
+        this.report(error);
+      }
+    }
+
     // The root ActivatedRoute is replaced on every navigation when routes are
     // never reused, but the root is always attached: treat it as no route.
     const route = options.route ?? null;
     const isRoot = route !== null && 'parent' in route && route.parent === null;
     const contribution: Contribution = {
+      hostId,
       route: isRoot ? null : route,
       priority: options.priority ?? 0,
       order: this.nextOrder++,
@@ -408,9 +466,9 @@ export class Seo {
     const subscription = router.events.subscribe((event) => {
       if (event instanceof NavigationEnd) {
         this.navigations++;
-        if (this.navigations === 2) {
-          // The first client navigation: server-only tags may go now.
-          this.reconciler.holdServerOnlyTags(false);
+        if (this.navigations === 2 && untracked(this.serverCopies).size > 0) {
+          // The first client navigation: the server's page is gone, and so are its copies.
+          this.serverCopies.set(new Map());
         }
         sync();
       }
@@ -425,9 +483,15 @@ export class Seo {
 
   private compute(): ResolvedHead {
     const attached = this.attached();
-    const contributions = this.contributions()
+    const live = this.contributions()
       .filter((item) => item.route === null || attached === null || attached.has(item.route))
-      .sort((a, b) => a.priority - b.priority || a.order - b.order)
+      .map((item) => ({ priority: item.priority, server: false, order: item.order, value: item.value }));
+    // Server copies stand in for components that have not hydrated, while their host is still in the page.
+    const copies = [...this.serverCopies().values()]
+      .filter((copy) => this.doc.querySelector?.(`[${SEO_HOST_ATTR}="${copy.id}"]`) != null)
+      .map((copy) => ({ priority: copy.priority, server: true, order: copy.order, value: () => copy.config }));
+    const contributions = [...copies, ...live]
+      .sort((a, b) => a.priority - b.priority || Number(b.server) - Number(a.server) || a.order - b.order)
       .map((item) => item.value())
       .filter((config) => {
         if (config === NOT_READY) {
@@ -491,6 +555,38 @@ export class Seo {
         this.warned.add(id);
         console.warn(`[ngx-seo] ${message} (${path})`);
       }
+    }
+  }
+
+  /** Server only: records component contributions for the browser to use until they hydrate. */
+  private writeServerCopies(): void {
+    if (!isPlatformServer(this.platformId)) {
+      return;
+    }
+    try {
+      const copies: ServerCopy[] = [];
+      for (const item of this.contributions()) {
+        if (item.hostId === null) {
+          continue;
+        }
+        const config = untracked(item.value);
+        if (config === NOT_READY) {
+          continue;
+        }
+        try {
+          // Only what survives JSON travels; functions (e.g. a title template) do not.
+          copies.push({ id: item.hostId, priority: item.priority, order: item.order, config: JSON.parse(JSON.stringify(config)) });
+        } catch (error) {
+          this.report(error);
+        }
+      }
+      if (copies.length > 0) {
+        this.transferState.set(SERVER_COPIES, copies);
+      } else {
+        this.transferState.remove(SERVER_COPIES);
+      }
+    } catch (error) {
+      this.report(error);
     }
   }
 

@@ -348,10 +348,13 @@ page asks to override it any more.
   until the initial navigation has finished. It takes over at the first of
   three things: the app becoming stable, one second passing (an app with a
   recurring timer may never be stable), or the next navigation.
-  - **Incremental hydration.** Tags the server rendered stay until the first
-    client navigation, even if no client layer provides them yet. This
-    covers SEO from components inside `@defer (hydrate …)` blocks that have
-    not hydrated.
+  - **Incremental hydration.** The server records each component's
+    contribution (in `TransferState`, linked by a `data-seo-c` attribute on
+    the component host). In the browser, a component inside a
+    `@defer (hydrate …)` block that has not hydrated yet keeps contributing
+    the server's copy. Once it hydrates, its own contribution takes over. All
+    copies are dropped on the first client navigation. Only JSON-safe values
+    travel, so a function such as a per-layer `titleTemplate` does not.
 - **Navigation.** In the browser the head is applied after each render pass.
   By then every component created while rendering has contributed, and its
   inputs are bound. The head therefore moves straight from one page's
