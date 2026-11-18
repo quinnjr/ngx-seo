@@ -10,12 +10,13 @@ import {
   RouterStateSnapshot,
   Routes,
   TitleStrategy,
+  RouterModule,
   RouterOutlet,
   provideRouter,
 } from '@angular/router';
 import { injectSeo } from '../src/lib/inject-seo';
 import { HeadReconciler } from '../src/lib/reconciler';
-import { Injectable } from '@angular/core';
+import { Injectable, NgModule } from '@angular/core';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { provideSeo } from '../src/lib/provide-seo';
 import type { SeoConfig, SeoSiteConfig } from '../src/lib/types';
@@ -382,6 +383,31 @@ describe('route lifecycle', () => {
     expect(meta('robots')).toBeNull();
     await go('/drafts');
     expect(document.title).toBe('Draft | S');
+  });
+
+  it('drops contributions from services of a lazily loaded route when it is left', async () => {
+    @Injectable()
+    class LazySeo {
+      readonly seo = injectSeo({ title: 'Lazy', robots: { index: false } });
+    }
+    @Component({ selector: 'seo-lazy', template: '' })
+    class LazyPage {
+      readonly lazy = inject(LazySeo);
+    }
+    @NgModule({ imports: [RouterModule.forChild([{ path: '', component: LazyPage }])], providers: [LazySeo] })
+    class LazyModule {}
+    const { go } = await setup([
+      { path: 'standalone', loadChildren: () => Promise.resolve([{ path: '', providers: [LazySeo], component: LazyPage }]) },
+      { path: 'module', loadChildren: () => Promise.resolve(LazyModule) },
+      { path: 'home', component: Page, data: { seo: { title: 'Home' } } },
+    ]);
+    for (const url of ['/standalone', '/module']) {
+      await go(url);
+      expect(meta('robots'), url).toBe('noindex');
+      await go('/home');
+      expect(meta('robots'), url).toBeNull();
+      expect(document.title, url).toBe('Home | S');
+    }
   });
 });
 

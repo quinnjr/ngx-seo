@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { resolveHead } from '../src/lib/derive';
+import { mergeLayers } from '../src/lib/merge';
 import type { ResolvedHead, SeoConfig, SeoSiteConfig } from '../src/lib/types';
 
 const site: SeoSiteConfig = { siteName: 'Site', baseUrl: 'https://x.test' };
@@ -556,5 +557,25 @@ describe('resolveHead', () => {
     expect(head.tags.find((t) => t.key === 'meta:property:og:image')?.attrs['content']).toBe('https://x.test/blog/assets/og.png');
     expect(head.canonical).toBe('https://x.test/blog/list');
     expect(head.tags.find((t) => t.attrs['rel'] === 'icon')?.attrs['href']).toBe('https://x.test/favicon.ico');
+  });
+
+  it('keeps repeated extra meta with the same property', () => {
+    const head = resolveHead(
+      mergeLayers([{ meta: [{ property: 'video:tag', content: 'one', key: 't1' }, { property: 'video:tag', content: 'two', key: 't2' }, { property: 'video:tag', content: 'three', key: 't3' }] }]),
+      site,
+      { path: '/', origin: null },
+    );
+    expect(head.tags.filter((t) => t.attrs['property'] === 'video:tag').map((t) => t.attrs['content'])).toEqual(['one', 'two', 'three']);
+  });
+
+  it('reports scalar fields of the wrong type', () => {
+    const onError = vi.fn();
+    const head = resolveHead({ title: 2024 as never, description: 42 as never, author: {} as never, lang: 1 as never }, site, {
+      path: '/',
+      origin: null,
+      onError,
+    });
+    expect(head.title).toBeNull();
+    expect(onError).toHaveBeenCalledTimes(4);
   });
 });

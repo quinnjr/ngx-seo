@@ -113,7 +113,6 @@ export class Seo {
     restoreTitle: this.ownsTitles || !this.routed,
   });
   private readonly basePath = this.resolveBasePath();
-  private readonly rootInjector = inject(EnvironmentInjector);
   /** The site config as applied: without `defaultTitle` while another TitleStrategy owns titles. */
   private readonly effectiveSite: SeoSiteConfig =
     this.ownsTitles || !this.routed ? this.site : { ...this.site, defaultTitle: undefined };
@@ -376,33 +375,6 @@ export class Seo {
     return resolveHead(mergeLayers([this.defaultsLayer([], env)]), this.effectiveSite, env);
   }
 
-  /**
-   * @internal The route config a contribution made from `injector` belongs to,
-   * for services rather than components: a service from a route's `providers`
-   * (or a lazy route's injector) belongs to that route. Root services, and
-   * injectors the router did not create, belong to no route.
-   */
-  routeForInjector(injector: EnvironmentInjector): Route | null {
-    const router = this.router;
-    if (router === null || injector === this.rootInjector) {
-      return null;
-    }
-    type InternalRoute = Route & { _injector?: unknown; _loadedInjector?: unknown; _loadedRoutes?: Route[] };
-    const search = (routes: readonly Route[] | undefined): Route | null => {
-      for (const route of (routes ?? []) as InternalRoute[]) {
-        if (route._injector === injector || route._loadedInjector === injector) {
-          return route;
-        }
-        const found = search(route.children) ?? search(route._loadedRoutes);
-        if (found !== null) {
-          return found;
-        }
-      }
-      return null;
-    };
-    return search(router.config);
-  }
-
   private defaultsLayer(layers: SeoConfig[], env: { path: string; origin: string | null; basePath?: string }): SeoConfig {
     const defaults = this.site.defaults;
     if (typeof defaults !== 'function') {
@@ -438,7 +410,7 @@ export class Seo {
       trailingSlash: this.site.canonical?.trailingSlash ?? 'preserve',
       keepQueryParams: this.site.canonical?.keepQueryParams ?? [],
     });
-    for (const message of diagnose(head, this.lastLayers, current)) {
+    for (const message of diagnose(head, this.lastLayers, current, { checkTitle: this.ownsTitles || !this.routed })) {
       const id = `${path.split('?')[0]}\n${message}`;
       if (!this.warned.has(id)) {
         this.warned.add(id);

@@ -120,4 +120,8 @@ describe('diagnostics in the Seo service', () => {
     expect(() => TestBed.tick()).not.toThrow();
     expect(document.title).toBe('T');
   });
+
+  it('does not warn about a missing title when an app TitleStrategy owns titles', () => {
+    expect(diagnose(resolveHead({ description: 'D' }, site, { path: '/', origin: null }), [], null, { checkTitle: false })).toEqual([]);
+  });
 });

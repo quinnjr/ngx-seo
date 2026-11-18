@@ -252,8 +252,9 @@ Only where the merged config leaves a value unset:
   holds a URL (`og:url`, `og:image*`, `og:video*`, `og:audio*`,
   `og:see_also`, `twitter:image`, `twitter:url`, `twitter:player*`, matched
   case-insensitively). A value that cannot be made absolute, or is not
-  `http(s)`, is dropped and reported by diagnostics. No `meta` content
-  starting with `javascript:`, `vbscript:` or `data:` is ever emitted.
+  `http(s)`, is dropped and reported by diagnostics. No extra `meta`
+  content starting with `javascript:`, `vbscript:` or `data:` is ever
+  emitted.
 
 ## SeoConfig reference
 
@@ -273,7 +274,7 @@ All fields are optional.
 | `openGraph` | `title`, `description`, `type`, `url`, `siteName`, `locale`, `alternateLocales`, `images`, `videos`, `audio`, `article`, `profile`, `book`. |
 | `twitter` | `card`, `site`, `creator`, `title`, `description`, `image`, `imageAlt`. |
 | `jsonLd` | `JsonLdNode[]`. |
-| `meta` | Extra `{ name \| property \| httpEquiv, content, key? }[]`. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it. |
+| `meta` | Extra `{ name \| property \| httpEquiv, content, key? }[]`. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it within the same layer. A higher layer that sets the field itself (`description`, `robots`, `openGraph.title`, …) wins over lower extra tags, so site-wide values moved from `index.html` into `defaults.meta` never override a page. Repeated properties (`video:tag`, `music:song`, …) are all kept. |
 | `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, as?, crossorigin?, fetchpriority?, referrerpolicy?, color?, key? }[]`. A `canonical` or `alternate`+`hreflang` link replaces the derived one; a custom `key` never does. `rel`, meta names and `hreflang` are compared case-insensitively. |
 | `http` | `{ status, headers }`, applied to the server response. |
 
@@ -349,9 +350,9 @@ page asks to override it any more.
   write signals. Errors are contained as narrowly as possible:
   - A malformed field from an untyped source (a CMS, say) drops only its own
     group of tags, and wrongly typed values are reported. A cyclic object
-    is dropped where the cycle starts. A single string where a list is
-    expected counts as a one-item list; for images, video and audio, a bare
-    URL is accepted.
+    is dropped where the cycle starts. A single string or object where a
+    list is expected counts as a one-item list (for example one JSON-LD node,
+    or a bare URL for images, video and audio).
   - A JSON-LD node that cannot be serialised (for example a cycle), or that
     has no `@type`, is dropped on its own.
   - A throwing title template falls back to the plain title.

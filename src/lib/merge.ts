@@ -212,11 +212,14 @@ function mergeFields(
       continue;
     }
     if (Object.hasOwn(KEYED_LISTS, here)) {
-      const list = typeof value === 'string' ? [value] : value;
-      if (Array.isArray(list)) {
-        const existing = Array.isArray(target[key]) ? (target[key] as unknown[]) : [];
-        target[key] = mergeKeyedList(existing, list, here);
+      // A single string or object where a list is expected counts as a one-item list.
+      const list = typeof value === 'string' || isPlainObject(value) ? [value] : value;
+      if (!Array.isArray(list)) {
+        onError(new Error(`ngx-seo: ignored ${here}: expected a list`));
+        continue;
       }
+      const existing = Array.isArray(target[key]) ? (target[key] as unknown[]) : [];
+      target[key] = mergeKeyedList(existing, list, here);
       continue;
     }
     if (Array.isArray(value)) {
@@ -241,6 +244,107 @@ function mergeFields(
   }
 }
 
+/** Meta names/properties each first-class field produces; `*` marks a prefix. */
+const FIELD_META: Record<string, string[]> = {
+  title: ['og:title', 'twitter:title'],
+  description: ['description', 'og:description', 'twitter:description'],
+  keywords: ['keywords'],
+  author: ['author'],
+  robots: ['robots'],
+  image: ['og:image*', 'twitter:image*'],
+  canonical: ['og:url'],
+};
+const OG_META: Record<string, string[]> = {
+  title: ['og:title'],
+  description: ['og:description'],
+  type: ['og:type'],
+  url: ['og:url'],
+  siteName: ['og:site_name'],
+  locale: ['og:locale'],
+  alternateLocales: ['og:locale:alternate'],
+  images: ['og:image*'],
+  videos: ['og:video*'],
+  audio: ['og:audio*'],
+  article: ['article:*'],
+  profile: ['profile:*'],
+  book: ['book:*'],
+};
+const TWITTER_META: Record<string, string[]> = {
+  card: ['twitter:card'],
+  site: ['twitter:site'],
+  creator: ['twitter:creator'],
+  title: ['twitter:title'],
+  description: ['twitter:description'],
+  image: ['twitter:image'],
+  imageAlt: ['twitter:image:alt'],
+};
+
+function isSet(value: unknown): boolean {
+  return value !== undefined && value !== '';
+}
+
+/**
+ * When a layer sets a first-class field, extra `meta` and `links` from lower
+ * layers that produce the same tag give way to it, so the higher layer wins
+ * whichever way each layer expressed the tag.
+ */
+function releaseClaimedExtras(result: Bag, layer: Bag): void {
+  const claims: string[] = [];
+  for (const [field, metas] of Object.entries(FIELD_META)) {
+    if (isSet(layer[field])) {
+      claims.push(...metas);
+    }
+  }
+  for (const [group, table] of [['openGraph', OG_META], ['twitter', TWITTER_META]] as const) {
+    const value = layer[group];
+    if (isPlainObject(value)) {
+      for (const [field, metas] of Object.entries(table)) {
+        if (isSet(value[field])) {
+          claims.push(...metas);
+        }
+      }
+    }
+  }
+  if (isPlainObject(layer['bots'])) {
+    claims.push(...Object.keys(layer['bots']).map((bot) => bot.toLowerCase()));
+  }
+  const claimed = (identity: string): boolean =>
+    claims.some((claim) => (claim.endsWith('*') ? identity.startsWith(claim.slice(0, -1)) : identity === claim));
+
+  if (claims.length > 0 && Array.isArray(result['meta'])) {
+    result['meta'] = result['meta'].filter((item) => {
+      if (!isPlainObject(item)) {
+        return true;
+      }
+      const identity = (text(item['name']) ?? text(item['property']))?.toLowerCase();
+      return identity === undefined || !claimed(identity);
+    });
+  }
+
+  if (Array.isArray(result['links'])) {
+    const ownsCanonical = isSet(layer['canonical']);
+    const hreflangs = new Set(
+      (Array.isArray(layer['alternates']) ? layer['alternates'] : [])
+        .filter(isPlainObject)
+        .map((item) => text(item['hreflang'])?.toLowerCase())
+        .filter((value): value is string => value !== undefined),
+    );
+    if (ownsCanonical || hreflangs.size > 0) {
+      result['links'] = result['links'].filter((item) => {
+        if (!isPlainObject(item)) {
+          return true;
+        }
+        const rel = text(item['rel'])?.toLowerCase();
+        if (rel === 'canonical') {
+          return !ownsCanonical;
+        }
+        const hreflang = text(item['hreflang'])?.toLowerCase();
+        return !(rel === 'alternate' && hreflang !== undefined && hreflangs.has(hreflang));
+      });
+    }
+  }
+}
+
 /**
  * Merges layers, lowest priority first, into one config. The result contains
  * no `null`, no empty strings and no removal markers.
@@ -250,6 +354,7 @@ export function mergeLayers(layers: readonly SeoConfig[], onError: (error: unkno
   for (const layer of layers) {
     const plain = asPlain(layer);
     if (isPlainObject(plain)) {
+      releaseClaimedExtras(result, plain);
       mergeObject(result, plain, '', new Set(), onError);
     }
   }

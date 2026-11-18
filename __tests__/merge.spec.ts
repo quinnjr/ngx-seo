@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mergeLayers, removeItem } from '../src/lib/merge';
 import type { SeoConfig } from '../src/lib/types';
 
@@ -351,5 +351,29 @@ describe('mergeLayers', () => {
     expect(merged.alternates).toEqual([]);
     expect(merged.links).toEqual([]);
     expect(merged.meta).toEqual([]);
+  });
+
+  it('lets a higher layer field beat lower extra meta and links with the same identity', () => {
+    const merged = mergeLayers([
+      {
+        meta: [
+          { name: 'robots', content: 'index, follow' },
+          { name: 'Description', content: 'Site wide' },
+          { property: 'og:image:width', content: '1' },
+          { name: 'theme-color', content: '#fff' },
+        ],
+        links: [{ rel: 'canonical', href: '/site' }, { rel: 'alternate', hreflang: 'de', href: '/de' }, { rel: 'icon', href: '/i.png' }],
+      },
+      { description: 'Admin', robots: { index: false }, image: '/a.png', canonical: '/admin', alternates: [{ hreflang: 'de', href: '/de-admin' }] },
+    ]);
+    expect(merged.meta).toEqual([{ name: 'theme-color', content: '#fff' }]);
+    expect(merged.links).toEqual([{ rel: 'icon', href: '/i.png' }]);
+  });
+
+  it('accepts a single object where a keyed list is expected and reports other shapes', () => {
+    const onError = vi.fn();
+    const merged = mergeLayers([{ jsonLd: { '@type': 'Article', headline: 'H' } as never, alternates: 5 as never }], onError);
+    expect(merged.jsonLd).toEqual([{ '@type': 'Article', headline: 'H' }]);
+    expect(onError).toHaveBeenCalledTimes(1);
   });
 });

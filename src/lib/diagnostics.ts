@@ -8,10 +8,20 @@ function isNoindex(robots: string | null): boolean {
  * Finds likely mistakes in a page's SEO. Returns human-readable messages;
  * an empty list means nothing looked wrong.
  */
-export function diagnose(head: ResolvedHead, layers: readonly SeoConfig[], currentUrl: string | null): string[] {
+export interface DiagnoseOptions {
+  /** False when another TitleStrategy sets the document title. */
+  checkTitle?: boolean;
+}
+
+export function diagnose(
+  head: ResolvedHead,
+  layers: readonly SeoConfig[],
+  currentUrl: string | null,
+  options: DiagnoseOptions = {},
+): string[] {
   const messages: string[] = [];
 
-  if (head.title === null) {
+  if (head.title === null && options.checkTitle !== false) {
     messages.push('No title is set for this page.');
   }
   if (!head.tags.some((tag) => tag.key === 'meta:name:description')) {

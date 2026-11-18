@@ -92,12 +92,14 @@ class TagList {
    */
   override(baseKey: string, tag: HeadTag['tag'], attrs: Record<string, string>): void {
     const existing = this.tags.find((item) => item.key === baseKey);
+    // Only a derived tag is replaced; further extra tags with this identity are all kept.
     if (existing !== undefined && !this.overridden.has(baseKey)) {
       this.overridden.add(baseKey);
       existing.tag = tag;
       existing.attrs = attrs;
       return;
     }
+    this.overridden.add(baseKey);
     this.add(baseKey, tag, attrs);
   }
 
@@ -299,6 +301,14 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     }
   };
 
+  /** A text field; a non-empty value of another type is reported and ignored. */
+  const textField = (value: unknown, field: string): string | undefined => {
+    if (value !== null && value !== undefined && value !== '' && typeof value !== 'string') {
+      onError(new Error(`ngx-seo: ignored ${field}: expected text`));
+    }
+    return str(value);
+  };
+
   const url = (value: unknown, field: string): string | null => {
     const text = str(value);
     if (text === undefined) {
@@ -336,8 +346,8 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
 
   const htmlAttrs = guarded<ResolvedHead['htmlAttrs']>(() => {
     const out: ResolvedHead['htmlAttrs'] = {};
-    const lang = str(merged.lang);
-    const dir = str(merged.dir);
+    const lang = textField(merged.lang, 'lang');
+    const dir = textField(merged.dir, 'dir');
     if (lang) {
       out.lang = lang;
     }
@@ -372,8 +382,8 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   }, null);
 
   // Title
-  const pageTitle = str(merged.title) ?? null;
-  const description = str(merged.description);
+  const pageTitle = textField(merged.title, 'title') ?? null;
+  const description = textField(merged.description, 'description');
   const ctx: SeoContext = {
     url: env.path,
     canonical,
@@ -403,7 +413,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       ? merged.keywords.filter((word): word is string => typeof word === 'string' && word !== '').join(', ')
       : str(merged.keywords);
     list.name('keywords', keywords);
-    list.name('author', str(merged.author));
+    list.name('author', textField(merged.author, 'author'));
     const robotsValue = merged.robots;
     robots = typeof robotsValue === 'string' || isObject(robotsValue) ? robotsContent(robotsValue) : null;
     list.name('robots', robots);
