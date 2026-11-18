@@ -194,7 +194,11 @@ when you come back.
   kept alive by a `RouteReuseStrategy`.
 - **In a service from a route's `providers`** (or a lazy route's injector),
   that is the route that provides it. Such services are never destroyed, so
-  this is what stops them leaking onto other pages.
+  this is what stops them leaking onto other pages. This holds even when the
+  service is created while the route's injector is being built (an
+  environment initializer, a lazy NgModule constructor).
+- **In a service from a module that a standalone page imports,** that is the
+  page that was active when the contribution was made.
 - **In a root service,** the contribution applies everywhere until it is
   destroyed.
 
@@ -296,7 +300,7 @@ All fields are optional.
 | `twitter` | `card`, `site`, `creator`, `title`, `description`, `image`, `imageAlt`. |
 | `jsonLd` | `JsonLdNode[]`. |
 | `meta` | Extra `{ name \| property \| httpEquiv, content, media?, key? }[]`. `media` is part of the identity, so light and dark `theme-color` variants are separate tags. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it within the same layer. A higher layer that sets the field itself (`description`, `robots`, `openGraph.title`, …) wins over lower extra tags, so site-wide values moved from `index.html` into `defaults.meta` never override a page. Repeated properties (`video:tag`, `music:song`, …) are all kept: a layer's items with the same identity form a group that replaces a lower layer's items of that identity, whatever their `key`. An extra `og:image` (or `og:video`, `og:audio`) replaces the whole derived item, including its size and alt tags, and `twitter:image` follows it. |
-| `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, as?, crossorigin?, fetchpriority?, referrerpolicy?, color?, key? }[]`. A `canonical` or `alternate`+`hreflang` link replaces the derived one; a custom `key` never does. `rel`, meta names and `hreflang` are compared case-insensitively. |
+| `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, as?, crossorigin?, fetchpriority?, referrerpolicy?, color?, key? }[]`. A `canonical` or `alternate`+`hreflang` link replaces the derived one; a custom `key` never does. `rel`, meta names and `hreflang` are compared case-insensitively; hrefs and explicit `key`s are compared exactly. |
 | `http` | `{ status, headers }`, applied to the server response. |
 
 ## Structured data (JSON-LD)

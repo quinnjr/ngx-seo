@@ -67,6 +67,12 @@ export interface ContributeOptions {
    */
   host?: Element | null;
   /**
+   * The environment injector of a service making the contribution. While no
+   * `route` is known, the contribution follows the route that injector
+   * belongs to, found when it is evaluated. `injectSeo` sets this for you.
+   */
+  injector?: EnvironmentInjector | null;
+  /**
    * A stable identity for a contribution from a route's services, the same
    * on server and browser. Only needed when one route has several such
    * contributions whose configs differ between server and browser.
@@ -92,6 +98,10 @@ type Source = SeoConfig | (() => SeoConfig);
 interface Contribution {
   readonly hostId: string | null;
   readonly route: ActivatedRoute | Route | null;
+  /** A non-root service injector, resolved to its route when evaluated. */
+  readonly injector: EnvironmentInjector | null;
+  /** The deepest primary route when an injector-bound contribution was made. */
+  readonly fallbackRoute: ActivatedRoute | null;
   readonly priority: number;
   readonly order: number;
   readonly value: Signal<SeoConfig>;
@@ -206,6 +216,7 @@ export class Seo {
   private navigations = 0;
   private nextHostId = 0;
   private readonly transferState = inject(TransferState);
+  private readonly rootInjector = inject(EnvironmentInjector);
   /**
    * Browser only: server copies of component contributions whose components
    * have not hydrated yet (for example inside `@defer (hydrate …)`).
@@ -419,9 +430,12 @@ export class Seo {
       this.report(error);
     }
 
+    const injector = boundRoute === null ? (options.injector ?? null) : null;
     const contribution: Contribution = {
       hostId,
       route: boundRoute,
+      injector,
+      fallbackRoute: injector === null ? null : this.deepestPrimaryRoute(),
       priority: options.priority ?? 0,
       order: order ?? this.nextOrder++,
       value,
@@ -567,8 +581,9 @@ export class Seo {
 
   private compute(): ResolvedHead {
     const attached = this.attached();
+    const routeInjectors = attached === null ? null : this.routeInjectors();
     const live = this.contributions()
-      .filter((item) => item.route === null || attached === null || attached.has(item.route))
+      .filter((item) => this.contributionAttached(item, attached, routeInjectors))
       .map((item) => ({ priority: item.priority, order: item.order, value: item.value }));
     // Server copies stand in for components that have not hydrated, while their host is still in the page.
     const copies = [...this.serverCopies().values()]
@@ -641,6 +656,66 @@ export class Seo {
         console.warn(`[ngx-seo] ${message} (${path})`);
       }
     }
+  }
+
+  /** Whether a contribution's route is attached; contributions with no route always are. */
+  private contributionAttached(
+    item: Contribution,
+    attached: ReadonlySet<ActivatedRoute | Route> | null,
+    routeInjectors: ReadonlyMap<unknown, Route> | null,
+  ): boolean {
+    if (attached === null) {
+      return true;
+    }
+    if (item.route !== null) {
+      return attached.has(item.route);
+    }
+    if (item.injector !== null && routeInjectors !== null) {
+      // Walk up from the service's injector to the first injector a route owns.
+      let current: unknown = item.injector;
+      while (current !== null && current !== undefined && current !== this.rootInjector) {
+        const owner = routeInjectors.get(current);
+        if (owner !== undefined) {
+          return attached.has(owner);
+        }
+        current = (current as { parent?: unknown }).parent;
+      }
+      // No route owns it (e.g. a module imported by a standalone page): follow
+      // the page that was active when the contribution was made.
+      return item.fallbackRoute === null || attached.has(item.fallbackRoute);
+    }
+    return true;
+  }
+
+  /** Every injector the router created for a route, mapped to its route config. */
+  private routeInjectors(): Map<unknown, Route> {
+    const owners = new Map<unknown, Route>();
+    type Internal = Route & { _injector?: unknown; _loadedInjector?: unknown; _loadedRoutes?: Route[] };
+    const visit = (routes: readonly Route[] | undefined): void => {
+      for (const route of (routes ?? []) as Internal[]) {
+        if (route._injector) {
+          owners.set(route._injector, route);
+        }
+        if (route._loadedInjector) {
+          owners.set(route._loadedInjector, route);
+        }
+        visit(route.children);
+        visit(route._loadedRoutes);
+      }
+    };
+    visit(this.router?.config);
+    return owners;
+  }
+
+  /** The deepest primary route in the current router state, or null without a router. */
+  private deepestPrimaryRoute(): ActivatedRoute | null {
+    let route: ActivatedRoute | null = this.router?.routerState.root ?? null;
+    let deepest: ActivatedRoute | null = null;
+    while (route !== null) {
+      deepest = route;
+      route = route.children.find((child) => child.outlet === PRIMARY_OUTLET) ?? null;
+    }
+    return deepest !== null && deepest.parent !== null ? deepest : null;
   }
 
   /**

@@ -419,4 +419,17 @@ describe('mergeLayers', () => {
     const two = mergeLayers([{ meta: [{ name: 'description', content: 'site' }] }, { meta: [{ key: 'x', name: 'description', content: 'page' }] }]);
     expect(two.meta).toEqual([{ key: 'x', name: 'description', content: 'page' }]);
   });
+
+  it('keeps link hrefs and explicit keys case-sensitive', () => {
+    const across = mergeLayers([
+      { links: [{ rel: 'preload', href: '/fonts/Inter.woff2', as: 'font' }] },
+      { links: [{ rel: 'Preload', href: '/fonts/inter.woff2', as: 'font' }] },
+    ]);
+    expect(across.links).toHaveLength(2);
+    const within = mergeLayers([{ links: [{ rel: 'prefetch', href: '/A.json' }, { rel: 'prefetch', href: '/a.json' }] }]);
+    expect(within.links).toHaveLength(2);
+    const keyed = mergeLayers([{ meta: [{ key: 'A', name: 'a', content: '1' }] }, { meta: [{ key: 'a', name: 'b', content: '2' }] }]);
+    expect(keyed.meta).toHaveLength(2);
+  });
 });
+

@@ -56,23 +56,26 @@ function routeConfigFor(router: Router | null, injector: EnvironmentInjector, ro
 export function injectSeo(config: SeoConfig | (() => SeoConfig), options: InjectSeoOptions = {}): SeoHandle {
   assertInInjectionContext(injectSeo);
   const seo = inject(Seo);
-  // Components belong to their own route. Services resolve ActivatedRoute to
-  // the root route, so a service from a route's providers is bound to that
-  // route's config instead (its injector is never destroyed).
   const host = inject(ElementRef, { optional: true });
   const inComponent = host !== null;
-  const route = inComponent
-    ? inject(ActivatedRoute, { optional: true })
-    : (routeConfigFor(
-        inject(Router, { optional: true }),
-        inject(EnvironmentInjector),
-        inject(ApplicationRef).injector,
-      ) ?? inject(ActivatedRoute, { optional: true }));
+  const environment = inject(EnvironmentInjector);
+  const rootInjector = inject(ApplicationRef).injector;
+  const isRootService = !inComponent && environment === rootInjector;
+  // Components belong to their own route, root services to none (the root
+  // route). A service in another injector belongs to a route: its config if
+  // the router already records it, otherwise the Seo service resolves it from
+  // the injector when the contribution is evaluated (the route's injector may
+  // still be under construction, or the service may come from a module that
+  // a standalone page imports).
+  const routeConfig =
+    inComponent || isRootService ? null : routeConfigFor(inject(Router, { optional: true }), environment, rootInjector);
+  const route = inComponent || isRootService ? inject(ActivatedRoute, { optional: true }) : routeConfig;
   return seo.contribute(config, {
     priority: options.priority,
     key: options.key,
     destroyRef: inject(DestroyRef),
     route,
+    injector: inComponent || isRootService || routeConfig !== null ? null : environment,
     // Duck-typed: `instanceof` fails across realms (iframes, test DOMs).
     host: typeof (host?.nativeElement as Element | undefined)?.getAttribute === 'function' ? (host?.nativeElement as Element) : null,
   });

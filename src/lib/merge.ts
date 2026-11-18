@@ -47,6 +47,26 @@ function metaIdentity(item: Bag): string | undefined {
   return identity === undefined ? undefined : media === undefined ? identity : `${identity}|${media}`;
 }
 
+/** A user-written key in the form `mergeKeyedList` derives it, for lists HTML compares case-insensitively. */
+function normaliseKey(path: string, key: string): string {
+  if (path === 'alternates') {
+    return key.toLowerCase();
+  }
+  if (path === 'meta') {
+    return key.replace(/^[^|]*/, (identity) => identity.toLowerCase());
+  }
+  if (path === 'links') {
+    const bar = key.indexOf('|');
+    if (bar === -1) {
+      return key.toLowerCase() === 'canonical' ? 'canonical' : key;
+    }
+    const rel = key.slice(0, bar).toLowerCase();
+    const rest = key.slice(bar + 1);
+    return rel === 'alternate' ? `${rel}|${rest.toLowerCase()}` : `${rel}|${rest}`;
+  }
+  return key;
+}
+
 /** Keyed lists where higher layers come first. */
 const HIGHER_FIRST = new Set(['openGraph.images']);
 
@@ -130,17 +150,30 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
   const result = [...existing];
   const fresh: unknown[] = [];
 
-  const same = CASE_INSENSITIVE.has(path)
-    ? (a: string | undefined, b: string): boolean => a !== undefined && a.toLowerCase() === b.toLowerCase()
-    : (a: string | undefined, b: string): boolean => a === b;
+  /**
+   * Whether an item has the given key. Explicit `key`s and link hrefs are
+   * compared exactly; derived identities that HTML treats case-insensitively
+   * (meta names, rel, hreflang) are compared against the key normalised the
+   * same way, so `removeItem('en-US')` matches what was written as `en-US`.
+   */
+  const matchesKey = (item: Bag, key: string): boolean => {
+    const own = keyOf(item);
+    if (own === undefined) {
+      return false;
+    }
+    if (own === key || !CASE_INSENSITIVE.has(path) || text(item['key']) !== undefined) {
+      return own === key;
+    }
+    return own === normaliseKey(path, key);
+  };
   const indexOfKey = (list: unknown[], key: string): number =>
-    list.findIndex((item) => isPlainObject(item) && same(keyOf(item), key));
+    list.findIndex((item) => isPlainObject(item) && matchesKey(item, key));
   /** Removes every item with this key; returns where the first one was, or -1. */
   const removeAll = (list: unknown[], key: string): number => {
     let first = -1;
     for (let i = list.length - 1; i >= 0; i--) {
       const item = list[i];
-      if (isPlainObject(item) && same(keyOf(item), key)) {
+      if (isPlainObject(item) && matchesKey(item, key)) {
         list.splice(i, 1);
         first = i;
       }
@@ -189,7 +222,7 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
       const explicit = text(plain['key']);
       if (explicit !== undefined) {
         // The same explicit key twice in one layer: the later item wins.
-        const sameLayer = [...thisLayer].find((entry) => isPlainObject(entry) && same(keyOf(entry), explicit));
+        const sameLayer = [...thisLayer].find((entry) => isPlainObject(entry) && matchesKey(entry, explicit));
         if (sameLayer !== undefined) {
           const list = result.includes(sameLayer) ? result : fresh;
           list[list.indexOf(sameLayer)] = copy;
@@ -209,7 +242,7 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
             (entry) =>
               !thisLayer.has(entry) &&
               ((identity !== undefined && metaIdentity(entry)?.toLowerCase() === identity.toLowerCase()) ||
-                (explicit !== undefined && same(keyOf(entry), explicit))),
+                (explicit !== undefined && matchesKey(entry, explicit))),
           ),
         );
       }

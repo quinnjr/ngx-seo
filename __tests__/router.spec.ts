@@ -16,7 +16,7 @@ import {
 } from '@angular/router';
 import { injectSeo } from '../src/lib/inject-seo';
 import { HeadReconciler } from '../src/lib/reconciler';
-import { ApplicationRef, Injectable, NgModule, input } from '@angular/core';
+import { ApplicationRef, Injectable, NgModule, input, provideEnvironmentInitializer } from '@angular/core';
 import { faqPage } from '../src/lib/builders';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { provideSeo } from '../src/lib/provide-seo';
@@ -499,6 +499,48 @@ describe('route lifecycle', () => {
     ]);
     await go('/page/(side:popup)');
     expect(canonical()).toBe('https://x.test/page');
+  });
+
+  describe('route services created outside a component', () => {
+    @Injectable()
+    class DraftSeo {
+      readonly seo = injectSeo({ robots: { index: false } });
+    }
+
+    async function leaves(routes: Routes, url: string): Promise<void> {
+      const { go } = await setup([...routes, { path: 'home', component: Page }]);
+      await go(url);
+      expect(meta('robots'), url).toBe('noindex');
+      await go('/home');
+      expect(meta('robots'), url).toBeNull();
+    }
+
+    it('stops when the service was created by a route environment initializer', async () => {
+      await leaves(
+        [{ path: 'drafts', providers: [DraftSeo, provideEnvironmentInitializer(() => void inject(DraftSeo))], component: Page }],
+        '/drafts',
+      );
+    });
+
+    it('stops when the service was created by a lazy NgModule constructor', async () => {
+      @NgModule({ imports: [RouterModule.forChild([{ path: '', component: Page }])], providers: [DraftSeo] })
+      class EagerModule {
+        constructor() {
+          inject(DraftSeo);
+        }
+      }
+      await leaves([{ path: 'lazy', loadChildren: () => Promise.resolve(EagerModule) }], '/lazy');
+    });
+
+    it('stops when the service comes from an NgModule imported by a standalone page', async () => {
+      @NgModule({ providers: [DraftSeo] })
+      class DraftModule {}
+      @Component({ selector: 'seo-d-page', imports: [DraftModule], template: '' })
+      class DraftPage {
+        readonly service = inject(DraftSeo);
+      }
+      await leaves([{ path: 'drafts', component: DraftPage }], '/drafts');
+    });
   });
 });
 
