@@ -59,4 +59,10 @@ describe('canonicalFor', () => {
     expect(canonicalFor('//evil.test/foo', base, { trailingSlash: 'preserve', keepQueryParams: [] })).toBe('https://x.test/evil.test/foo');
     expect(canonicalFor('///evil.test', base, { trailingSlash: 'preserve', keepQueryParams: [] })).toBe('https://x.test/evil.test');
   });
+
+  it('keeps query parameters in keepQueryParams order', () => {
+    const policy = { trailingSlash: 'preserve' as const, keepQueryParams: ['page', 'sort'] };
+    expect(canonicalFor('/list?sort=x&page=2', base, policy)).toBe('https://x.test/list?page=2&sort=x');
+    expect(canonicalFor('/list?page=2&sort=x', base, policy)).toBe('https://x.test/list?page=2&sort=x');
+  });
 });

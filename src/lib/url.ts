@@ -64,10 +64,11 @@ export function canonicalFor(
     pathname = pathname.replace(/\/+$/, '') || '/';
   }
 
+  // Kept parameters follow keepQueryParams order, so one page has one canonical.
   const kept = new URLSearchParams();
-  for (const [key, value] of url.searchParams) {
-    if (policy.keepQueryParams.includes(key)) {
-      kept.append(key, value);
+  for (const name of policy.keepQueryParams) {
+    for (const value of url.searchParams.getAll(name)) {
+      kept.append(name, value);
     }
   }
   const query = kept.toString();

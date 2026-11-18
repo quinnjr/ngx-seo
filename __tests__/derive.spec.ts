@@ -420,7 +420,8 @@ describe('resolveHead', () => {
     });
     expect(value(head, 'meta:property:og:url')).toBe('https://x.test/page');
     expect(value(head, 'meta:property:og:image')).toBe('https://x.test/x.png');
-    expect(value(head, 'meta:name:twitter:image')).toBeUndefined();
+    // The unusable twitter:image is dropped; Twitter falls back to the extra og:image.
+    expect(value(head, 'meta:name:twitter:image')).toBe('https://x.test/x.png');
     expect(head.droppedUrls.length).toBeGreaterThan(0);
   });
 
@@ -623,5 +624,45 @@ describe('resolveHead', () => {
     expect(contents('og:locale:alternate')).toEqual(['es_ES']);
     expect(contents('article:tag')).toEqual(['x', 'y']);
     expect(new Set(head.tags.map((t) => t.key)).size).toBe(head.tags.length);
+  });
+
+  it('replaces the whole derived image when an extra og:image overrides it', () => {
+    const head = resolveHead(
+      mergeLayers([
+        { image: { url: '/default.jpg', width: 1200, height: 630, alt: 'Site logo' } },
+        { title: 'Page', meta: [{ property: 'og:image', content: '/page.png' }] },
+      ]),
+      site,
+      { path: '/', origin: null },
+    );
+    const props = head.tags.filter((t) => t.attrs['property']?.startsWith('og:image')).map((t) => [t.attrs['property'], t.attrs['content']]);
+    expect(props).toEqual([['og:image', 'https://x.test/page.png']]);
+    expect(value(head, 'meta:name:twitter:image')).toBe('https://x.test/page.png');
+    expect(value(head, 'meta:name:twitter:image:alt')).toBeUndefined();
+  });
+
+  it('gives Twitter the extra og:image when nothing else provides an image', () => {
+    const head = resolve({ meta: [{ property: 'og:image', content: '/only.png' }] });
+    expect(value(head, 'meta:name:twitter:image')).toBe('https://x.test/only.png');
+    expect(value(head, 'meta:name:twitter:card')).toBe('summary_large_image');
+  });
+
+  it('reports every wrongly typed scalar and accepts numeric strings for sizes', () => {
+    const onError = vi.fn();
+    const head = resolveHead(
+      {
+        keywords: 42,
+        canonical: 7,
+        robots: 1,
+        image: { url: '/a.png', width: '1200', height: 'tall' },
+        openGraph: { title: 99, type: 3, locale: true },
+        twitter: { site: 5, card: 7 },
+      } as never,
+      site,
+      { path: '/', origin: null, onError },
+    );
+    expect(value(head, 'meta:property:og:image:width')).toBe('1200');
+    expect(value(head, 'meta:property:og:image:height')).toBeUndefined();
+    expect(onError).toHaveBeenCalledTimes(9);
   });
 });

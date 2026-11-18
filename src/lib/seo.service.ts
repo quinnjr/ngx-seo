@@ -5,12 +5,14 @@ import {
   EnvironmentInjector,
   ErrorHandler,
   Injectable,
+  Injector,
   InjectionToken,
   PLATFORM_ID,
   REQUEST,
   RESPONSE_INIT,
   Signal,
   WritableSignal,
+  afterNextRender,
   computed,
   effect,
   inject,
@@ -102,6 +104,7 @@ export class Seo {
   private readonly site: SeoSiteConfig = inject(SEO_SITE_CONFIG, { optional: true }) ?? {};
   private readonly doc = inject(DOCUMENT);
   private readonly errorHandler = inject(ErrorHandler);
+  private readonly injector = inject(Injector);
   private readonly platformId = inject(PLATFORM_ID);
   /** Route titles belong to ngx-seo only while its own TitleStrategy is the active one. */
   private readonly ownsTitles = inject(TitleStrategy, { optional: true }) instanceof SeoTitleStrategy;
@@ -169,11 +172,20 @@ export class Seo {
         }
         this.writeResponse(head);
         if (this.diagnostics && this.ready && (!this.routed || this.router?.navigated === true)) {
-          this.warnSafely(head);
+          // Check after the render pass, so contributors created while rendering count.
+          afterNextRender(() => this.warnSafely(untracked(this.resolved)), { injector: this.injector });
         }
       });
     });
     this.followRouter();
+    if (this.site.baseUrl !== undefined && originOf(this.site.baseUrl) === null) {
+      this.report(
+        new Error(
+          `ngx-seo: baseUrl ${JSON.stringify(this.site.baseUrl)} is not an absolute http(s) URL; ` +
+            'falling back to the request or page origin.',
+        ),
+      );
+    }
     if (isPlatformServer(this.platformId) && !this.site.baseUrl && isDevMode() && !warnedMissingBaseUrl) {
       warnedMissingBaseUrl = true;
       console.warn(
@@ -465,7 +477,7 @@ export class Seo {
       }
     };
     const hrefPath = pathOf(fromHref);
-    return hrefPath !== '/' ? hrefPath : pathOf(this.site.baseUrl);
+    return hrefPath !== '/' ? hrefPath : originOf(this.site.baseUrl ?? null) === null ? '/' : pathOf(this.site.baseUrl);
   }
 
   /** Prefixes a router URL (which excludes the base href) with the base path. */

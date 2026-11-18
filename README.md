@@ -55,7 +55,7 @@ export const appConfig: ApplicationConfig = {
 | Option | Default | Meaning |
 |---|---|---|
 | `siteName` | none | Used for `og:site_name` and passed to title templates. |
-| `baseUrl` | request origin (server), `location.origin` (browser) | Origin used to make URLs absolute. Set it in production: request hosts are client-supplied. In dev mode the server warns once if it is missing. |
+| `baseUrl` | request origin (server), `location.origin` (browser) | Origin used to make URLs absolute. Set it in production: request hosts are client-supplied. In dev mode the server warns once if it is missing. A value that is not an absolute http(s) URL is reported to `ErrorHandler` and ignored. |
 | `titleTemplate` | none | `'%s | Site'` or `(title, ctx) => string`. |
 | `defaultTitle` | none | Used when no layer sets a title. Not templated. |
 | `canonical` | `{ trailingSlash: 'preserve', keepQueryParams: [] }` | How the canonical is derived from the router URL. |
@@ -239,7 +239,8 @@ Only where the merged config leaves a value unset:
   `website`.
 - **Canonical.** The origin, plus the path the app is served under, plus the
   router path. The fragment and every query parameter not in
-  `keepQueryParams` are removed. `og:url` follows the canonical, and
+  `keepQueryParams` are removed; kept parameters appear in `keepQueryParams`
+  order, so one page has one canonical. `og:url` follows the canonical, and
   `canonical: false` emits neither.
   - The serving path comes from `APP_BASE_HREF` or `<base href>` when that
     is not `/`, otherwise from the path of `baseUrl`. For example,
@@ -274,7 +275,7 @@ All fields are optional.
 | `openGraph` | `title`, `description`, `type`, `url`, `siteName`, `locale`, `alternateLocales`, `images`, `videos`, `audio`, `article`, `profile`, `book`. |
 | `twitter` | `card`, `site`, `creator`, `title`, `description`, `image`, `imageAlt`. |
 | `jsonLd` | `JsonLdNode[]`. |
-| `meta` | Extra `{ name \| property \| httpEquiv, content, media?, key? }[]`. `media` is part of the identity, so light and dark `theme-color` variants are separate tags. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it within the same layer. A higher layer that sets the field itself (`description`, `robots`, `openGraph.title`, …) wins over lower extra tags, so site-wide values moved from `index.html` into `defaults.meta` never override a page. Repeated properties (`video:tag`, `music:song`, …) are all kept: a layer's items with the same identity form a group that replaces a lower layer's group. |
+| `meta` | Extra `{ name \| property \| httpEquiv, content, media?, key? }[]`. `media` is part of the identity, so light and dark `theme-color` variants are separate tags. An extra tag with the same identity as a derived one (for example `name: 'description'`) replaces it within the same layer. A higher layer that sets the field itself (`description`, `robots`, `openGraph.title`, …) wins over lower extra tags, so site-wide values moved from `index.html` into `defaults.meta` never override a page. Repeated properties (`video:tag`, `music:song`, …) are all kept: a layer's items with the same identity form a group that replaces a lower layer's group. An extra `og:image` (or `og:video`, `og:audio`) replaces the whole derived item, including its size and alt tags, and `twitter:image` follows it. |
 | `links` | Extra `{ rel, href, hreflang?, type?, media?, sizes?, title?, as?, crossorigin?, fetchpriority?, referrerpolicy?, color?, key? }[]`. A `canonical` or `alternate`+`hreflang` link replaces the derived one; a custom `key` never does. `rel`, meta names and `hreflang` are compared case-insensitively. |
 | `http` | `{ status, headers }`, applied to the server response. |
 
@@ -349,7 +350,8 @@ page asks to override it any more.
   `ErrorHandler`, after any signal computation has finished, so a handler may
   write signals. Errors are contained as narrowly as possible:
   - A malformed field from an untyped source (a CMS, say) drops only its own
-    group of tags, and wrongly typed values are reported. A cyclic object
+    group of tags, and wrongly typed values are reported. Image and media
+    sizes may be numbers or strings of digits. A cyclic object
     is dropped where the cycle starts. A single string or object where a
     list is expected counts as a one-item list (for example one JSON-LD node,
     or a bare URL for images, video and audio).

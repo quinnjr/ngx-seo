@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ApplicationRef, Component, provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationRef, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { TestBed } from '@angular/core/testing';
 import { diagnose } from '../src/lib/diagnostics';
 import { resolveHead } from '../src/lib/derive';
 import { mergeLayers } from '../src/lib/merge';
+import { injectSeo } from '../src/lib/inject-seo';
 import { provideSeo } from '../src/lib/provide-seo';
 import { Seo } from '../src/lib/seo.service';
 import type { SeoConfig, SeoSiteConfig } from '../src/lib/types';
@@ -124,4 +125,25 @@ describe('diagnostics in the Seo service', () => {
   it('does not warn about a missing title when an app TitleStrategy owns titles', () => {
     expect(diagnose(resolveHead({ description: 'D' }, site, { path: '/', origin: null }), [], null, { checkTitle: false })).toEqual([]);
   });
+
+  it('waits for the render pass before checking, so nested contributors count', async () => {
+    @Component({ selector: 'seo-child', template: '' })
+    class Child {
+      readonly seo = injectSeo({ title: 'T', description: 'from child' });
+    }
+    @Component({ selector: 'seo-nested', imports: [Child], template: '@if (show()) { <seo-child /> }' })
+    class Nested {
+      readonly show = signal(true);
+    }
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), provideRouter([{ path: 'p', component: Nested }]), provideSeo(site)],
+    });
+    TestBed.inject(Seo);
+    const harness = await RouterTestingHarness.create();
+    await harness.navigateByUrl('/p');
+    TestBed.tick();
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('from child');
+    expect(warn).not.toHaveBeenCalled();
+  });
 });
+

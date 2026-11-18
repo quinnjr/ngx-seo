@@ -296,4 +296,10 @@ describe('Seo error containment', () => {
     TestBed.tick();
     expect(meta('author')).toBeNull();
   });
+
+  it('reports a baseUrl that is not an absolute http(s) URL and falls back to the page origin', () => {
+    const { errors } = boot({ baseUrl: 'www.example.com' });
+    expect(errors).toHaveBeenCalled();
+    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe(`${location.origin}/`);
+  });
 });

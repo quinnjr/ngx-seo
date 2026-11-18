@@ -6,6 +6,7 @@ import type {
   JsonLdNode,
   OpenGraphConfig,
   ResolvedHead,
+  RobotsDirectives,
   SeoConfig,
   SeoContext,
   SeoAlternate,
@@ -47,11 +48,13 @@ class TagList {
   readonly tags: HeadTag[] = [];
   private readonly counts = new Map<string, number>();
 
-  add(baseKey: string, tag: HeadTag['tag'], attrs: Record<string, string>, text?: string): void {
+  /** Appends a tag and returns its key. */
+  add(baseKey: string, tag: HeadTag['tag'], attrs: Record<string, string>, text?: string): string {
     const seen = this.counts.get(baseKey) ?? 0;
     this.counts.set(baseKey, seen + 1);
     const key = seen === 0 ? baseKey : `${baseKey}#${seen}`;
     this.tags.push(text === undefined ? { key, tag, attrs } : { key, tag, attrs, text });
+    return key;
   }
 
   private overridden = new Set<string>();
@@ -67,13 +70,39 @@ class TagList {
     this.add(key, tag, attrs);
   }
 
-  checkpoint(): { length: number; counts: Map<string, number>; overridden: Set<string>; attrs: HeadTag[] } {
+  /** Keys of tags that came from extra `meta`/`links` rather than derivation. */
+  extra = new Set<string>();
+  /** Base keys whose derived tags an extra tag replaced. */
+  replaced = new Set<string>();
+
+  checkpoint(): {
+    length: number;
+    counts: Map<string, number>;
+    overridden: Set<string>;
+    extra: Set<string>;
+    replaced: Set<string>;
+    attrs: HeadTag[];
+  } {
     return {
       length: this.tags.length,
       counts: new Map(this.counts),
       overridden: new Set(this.overridden),
+      extra: new Set(this.extra),
+      replaced: new Set(this.replaced),
       attrs: this.tags.map((tag) => ({ ...tag })),
     };
+  }
+
+  /** Removes the tag with this exact key. */
+  remove(key: string): void {
+    const at = this.tags.findIndex((item) => item.key === key);
+    if (at !== -1) {
+      this.tags.splice(at, 1);
+    }
+  }
+
+  find(key: string): HeadTag | undefined {
+    return this.tags.find((item) => item.key === key);
   }
 
   restore(checkpoint: ReturnType<TagList['checkpoint']>): void {
@@ -84,6 +113,8 @@ class TagList {
       this.counts.set(key, count);
     }
     this.overridden = checkpoint.overridden;
+    this.extra = checkpoint.extra;
+    this.replaced = checkpoint.replaced;
   }
 
   /**
@@ -104,9 +135,11 @@ class TagList {
         }
         this.tags[first] = { key: baseKey, tag, attrs };
         this.counts.set(baseKey, 1);
+        this.extra.add(baseKey);
+        this.replaced.add(baseKey);
         return;
       }
-      this.add(baseKey, tag, attrs);
+      this.extra.add(this.add(baseKey, tag, attrs));
       return;
     }
     // Further extra tags with this identity are all kept, right after the group.
@@ -119,6 +152,7 @@ class TagList {
     const seen = this.counts.get(baseKey) ?? 0;
     this.counts.set(baseKey, seen + 1);
     const entry: HeadTag = { key: `${baseKey}#${seen}`, tag, attrs };
+    this.extra.add(entry.key);
     if (last === -1) {
       this.tags.push(entry);
     } else {
@@ -144,10 +178,6 @@ function dateText(value: unknown): string | undefined {
     return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
   }
   return str(value);
-}
-
-function numberText(value: unknown): string | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? String(value) : undefined;
 }
 
 function applyTemplate(template: TitleTemplate, title: string, ctx: SeoContext): string {
@@ -296,8 +326,8 @@ function objects<T>(value: unknown): T[] {
  * tags and is reported through `env.onError`.
  */
 export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: ResolveEnv): ResolvedHead {
-  const base = site.baseUrl ?? env.origin;
-  const origin = originOf(base);
+  // An unusable baseUrl (reported by the Seo service) falls back to the request or page origin.
+  const origin = originOf(site.baseUrl ?? null) ?? originOf(env.origin);
   const droppedUrls: string[] = [];
   const onError = env.onError ?? (() => {});
   // Root-relative URLs resolve against the origin, document-relative ones against the serving path.
@@ -330,6 +360,20 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       onError(new Error(`ngx-seo: ignored ${field}: expected text`));
     }
     return str(value);
+  };
+
+  /** A size: a finite number or a string of digits; anything else is reported and ignored. */
+  const numberField = (value: unknown, field: string): string | undefined => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+      return value.trim();
+    }
+    if (value !== null && value !== undefined && value !== '') {
+      onError(new Error(`ngx-seo: ignored ${field}: expected a number`));
+    }
+    return undefined;
   };
 
   const url = (value: unknown, field: string): string | null => {
@@ -395,6 +439,9 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       // An extra canonical link overrides the derived canonical everywhere, og:url included.
       return fromLink;
     }
+    if (merged.canonical !== undefined && merged.canonical !== null && merged.canonical !== false && typeof merged.canonical !== 'string') {
+      onError(new Error('ngx-seo: ignored canonical: expected a URL or false'));
+    }
     if (merged.canonical === false) {
       return null;
     }
@@ -432,13 +479,20 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   let robots: string | null = null;
   section(() => {
     list.name('description', description);
+    const keywordsValue: unknown = merged.keywords;
+    if (keywordsValue !== undefined && keywordsValue !== null && !Array.isArray(keywordsValue) && typeof keywordsValue !== 'string') {
+      onError(new Error('ngx-seo: ignored keywords: expected a list or text'));
+    }
     const keywords = Array.isArray(merged.keywords)
       ? merged.keywords.filter((word): word is string => typeof word === 'string' && word !== '').join(', ')
       : str(merged.keywords);
     list.name('keywords', keywords);
     list.name('author', textField(merged.author, 'author'));
-    const robotsValue = merged.robots;
-    robots = typeof robotsValue === 'string' || isObject(robotsValue) ? robotsContent(robotsValue) : null;
+    const robotsValue: unknown = merged.robots;
+    if (robotsValue !== undefined && robotsValue !== null && typeof robotsValue !== 'string' && !isObject(robotsValue)) {
+      onError(new Error('ngx-seo: ignored robots: expected directives or text'));
+    }
+    robots = typeof robotsValue === 'string' || isObject(robotsValue) ? robotsContent(robotsValue as RobotsDirectives | string) : null;
     list.name('robots', robots);
   });
   section(() => {
@@ -475,15 +529,32 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
 
   // Open Graph
   const og: OpenGraphConfig = isObject(merged.openGraph) ? merged.openGraph : {};
+  const tw: TwitterConfig = isObject(merged.twitter) ? merged.twitter : {};
+  // Read once, so a wrongly typed value is reported once.
+  const ogText = {
+    title: textField(og.title, 'openGraph.title'),
+    description: textField(og.description, 'openGraph.description'),
+    type: textField(og.type, 'openGraph.type'),
+    siteName: textField(og.siteName, 'openGraph.siteName'),
+    locale: textField(og.locale, 'openGraph.locale'),
+  };
+  const twText = {
+    card: textField(tw.card, 'twitter.card'),
+    site: textField(tw.site, 'twitter.site'),
+    creator: textField(tw.creator, 'twitter.creator'),
+    title: textField(tw.title, 'twitter.title'),
+    description: textField(tw.description, 'twitter.description'),
+    imageAlt: textField(tw.imageAlt, 'twitter.imageAlt'),
+  };
   const images: SeoImage[] = [];
   section(() => {
-    list.property('og:title', str(og.title) ?? socialTitle);
-    list.property('og:description', str(og.description) ?? description);
+    list.property('og:title', ogText.title ?? socialTitle);
+    list.property('og:description', ogText.description ?? description);
     const derivedType = isObject(og.article) ? 'article' : isObject(og.profile) ? 'profile' : isObject(og.book) ? 'book' : 'website';
-    list.property('og:type', str(og.type) ?? derivedType);
+    list.property('og:type', ogText.type ?? derivedType);
     list.property('og:url', (og.url ? url(og.url, 'openGraph.url') : null) ?? canonical);
-    list.property('og:site_name', str(og.siteName) ?? site.siteName);
-    list.property('og:locale', str(og.locale));
+    list.property('og:site_name', ogText.siteName ?? site.siteName);
+    list.property('og:locale', ogText.locale);
     for (const locale of items<string>(og.alternateLocales)) {
       list.property('og:locale:alternate', str(locale));
     }
@@ -510,8 +581,8 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       images.push({ ...image, url: src });
       list.property('og:image', src);
       list.property('og:image:type', str(image.type));
-      list.property('og:image:width', numberText(image.width));
-      list.property('og:image:height', numberText(image.height));
+      list.property('og:image:width', numberField(image.width, `${field}.width`));
+      list.property('og:image:height', numberField(image.height, `${field}.height`));
       list.property('og:image:alt', str(image.alt));
     }
   });
@@ -528,8 +599,8 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
         }
         list.property(prop, src);
         list.property(`${prop}:type`, str(item.type));
-        list.property(`${prop}:width`, numberText(item.width));
-        list.property(`${prop}:height`, numberText(item.height));
+        list.property(`${prop}:width`, numberField(item.width, `${field}[${index}].width`));
+        list.property(`${prop}:height`, numberField(item.height, `${field}[${index}].height`));
       });
     });
   };
@@ -576,17 +647,16 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   });
 
   // Twitter
+  const explicitTwitterImage = tw.image ? url(tw.image, 'twitter.image') : null;
   section(() => {
-    const tw: TwitterConfig = isObject(merged.twitter) ? merged.twitter : {};
-    const explicitImage = tw.image ? url(tw.image, 'twitter.image') : null;
-    const twitterImage = explicitImage ?? images[0]?.url ?? null;
-    list.name('twitter:card', str(tw.card) ?? (twitterImage ? 'summary_large_image' : 'summary'));
-    list.name('twitter:site', str(tw.site));
-    list.name('twitter:creator', str(tw.creator));
-    list.name('twitter:title', str(tw.title) ?? str(og.title) ?? socialTitle);
-    list.name('twitter:description', str(tw.description) ?? str(og.description) ?? description);
+    const twitterImage = explicitTwitterImage ?? images[0]?.url ?? null;
+    list.name('twitter:card', twText.card ?? (twitterImage ? 'summary_large_image' : 'summary'));
+    list.name('twitter:site', twText.site);
+    list.name('twitter:creator', twText.creator);
+    list.name('twitter:title', twText.title ?? ogText.title ?? socialTitle);
+    list.name('twitter:description', twText.description ?? ogText.description ?? description);
     list.name('twitter:image', twitterImage);
-    list.name('twitter:image:alt', str(tw.imageAlt) ?? (explicitImage ? undefined : str(images[0]?.alt)));
+    list.name('twitter:image:alt', twText.imageAlt ?? (explicitTwitterImage ? undefined : str(images[0]?.alt)));
   });
 
   // Extra meta
@@ -631,6 +701,40 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
         list.override(`meta:http-equiv:${httpEquiv.toLowerCase()}${suffix}`, 'meta', withMedia({ 'http-equiv': httpEquiv, content }));
       }
     });
+  });
+
+  // An extra og:image/og:video/og:audio replaces the whole derived media item,
+  // and Twitter follows the Open Graph image it now describes.
+  section(() => {
+    for (const media of ['og:image', 'og:video', 'og:audio']) {
+      const base = `meta:property:${media}`;
+      if (!list.replaced.has(base)) {
+        continue;
+      }
+      for (const tag of [...list.tags]) {
+        if (tag.key.startsWith(`${base}:`) && !list.extra.has(tag.key)) {
+          list.remove(tag.key);
+        }
+      }
+    }
+    const ogImage = list.tags.find((tag) => tag.attrs['property'] === 'og:image')?.attrs['content'];
+    const derived = (key: string): boolean => !list.extra.has(key);
+    if (explicitTwitterImage === null && derived('meta:name:twitter:image')) {
+      const current = list.find('meta:name:twitter:image');
+      if (ogImage !== undefined && current === undefined) {
+        list.add('meta:name:twitter:image', 'meta', { name: 'twitter:image', content: ogImage });
+      } else if (ogImage !== undefined && current !== undefined) {
+        current.attrs = { ...current.attrs, content: ogImage };
+      }
+    }
+    if (list.replaced.has('meta:property:og:image') && twText.imageAlt === undefined && derived('meta:name:twitter:image:alt')) {
+      list.remove('meta:name:twitter:image:alt');
+    }
+    const card = list.find('meta:name:twitter:card');
+    if (card !== undefined && twText.card === undefined && derived('meta:name:twitter:card')) {
+      const hasImage = list.find('meta:name:twitter:image') !== undefined;
+      card.attrs = { ...card.attrs, content: hasImage ? 'summary_large_image' : 'summary' };
+    }
   });
 
   // Extra links
