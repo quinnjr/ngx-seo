@@ -1,9 +1,13 @@
 import {
+  ApplicationRef,
   DestroyRef,
   DOCUMENT,
   EnvironmentInjector,
   ErrorHandler,
   Injectable,
+  PLATFORM_ID,
+  REQUEST,
+  RESPONSE_INIT,
   Signal,
   WritableSignal,
   computed,
@@ -12,7 +16,8 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { NavigationEnd, Router } from '@angular/router';
+import { isPlatformBrowser, isPlatformServer } from '@angular/common';
+import { NavigationCancel, NavigationEnd, NavigationError, NavigationSkipped, ROUTES, Router } from '@angular/router';
 import { resolveHead } from './derive';
 import { mergeLayers } from './merge';
 import { HeadReconciler } from './reconciler';
@@ -20,6 +25,7 @@ import { collectRouteLayers } from './route-layers';
 import { SEO_SITE_CONFIG } from './tokens';
 import type { ResolvedHead, SeoConfig, SeoContext, SeoHandle, SeoSiteConfig } from './types';
 import { originOf } from './url';
+import { ResponseWriter } from './response';
 
 export interface ContributeOptions {
   /** Higher wins. Ties resolve by creation order. Default 0. */
@@ -56,6 +62,16 @@ export class Seo {
   private readonly doc = inject(DOCUMENT);
   private readonly errorHandler = inject(ErrorHandler);
   private readonly reconciler = new HeadReconciler(this.doc);
+  private readonly platformId = inject(PLATFORM_ID);
+  private readonly request = inject(REQUEST, { optional: true });
+  private readonly response = isPlatformServer(this.platformId)
+    ? new ResponseWriter(inject(RESPONSE_INIT, { optional: true }))
+    : null;
+  private readonly router = inject(Router, { optional: true });
+  /** Router is root-provided; only apps that registered routes will navigate. */
+  private readonly routed = inject(ROUTES, { optional: true }) !== null;
+  /** False while the browser waits to take over server-rendered tags. */
+  private ready = !(isPlatformBrowser(this.platformId) && this.reconciler.hasServerRendered());
 
   private readonly routeLayers = signal<readonly SeoConfig[]>([]);
   private readonly routeTitle = signal<string | undefined>(undefined);
@@ -77,9 +93,17 @@ export class Seo {
   constructor() {
     effect(() => {
       const head = this.resolved();
-      untracked(() => this.reconcile(head));
+      untracked(() => {
+        this.response?.write(head.http);
+        if (this.ready) {
+          this.reconcile(head);
+        }
+      });
     });
     this.followRouter();
+    if (!this.ready) {
+      void this.takeOverAfterHydration();
+    }
   }
 
   /** Adds a layer above routes and defaults. */
@@ -148,8 +172,39 @@ export class Seo {
     this.path.set(path);
   }
 
+  /**
+   * Waits for the initial navigation and the first stable app before touching
+   * server-rendered tags, so client data that the server already had is not
+   * stripped and rebuilt while it is still arriving.
+   */
+  private async takeOverAfterHydration(): Promise<void> {
+    const appRef = inject(ApplicationRef);
+    const router = this.router;
+    try {
+      if (router !== null && this.routed && !router.navigated) {
+        await new Promise<void>((resolve) => {
+          const subscription = router.events.subscribe((event) => {
+            if (
+              event instanceof NavigationEnd ||
+              event instanceof NavigationCancel ||
+              event instanceof NavigationError ||
+              event instanceof NavigationSkipped
+            ) {
+              subscription.unsubscribe();
+              resolve();
+            }
+          });
+        });
+      }
+      await appRef.whenStable();
+    } finally {
+      this.ready = true;
+      this.reconcile(untracked(this.resolved));
+    }
+  }
+
   private followRouter(): void {
-    const router = inject(Router, { optional: true });
+    const router = this.router;
     if (router === null) {
       return;
     }
@@ -217,7 +272,7 @@ export class Seo {
   }
 
   private origin(): string | null {
-    return originOf(this.doc.location?.href ?? null);
+    return originOf(this.request?.url ?? null) ?? originOf(this.doc.location?.href ?? null);
   }
 
   private initialPath(): string {
