@@ -9,6 +9,7 @@ import type {
   SeoConfig,
   SeoContext,
   SeoImage,
+  SeoLinkTag,
   SeoMedia,
   SeoSiteConfig,
   TitleTemplate,
@@ -175,7 +176,13 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     keepQueryParams: site.canonical?.keepQueryParams ?? [],
   } as const;
   let canonical: string | null = null;
-  if (merged.canonical === false) {
+  const canonicalLink = (merged.links ?? []).find(
+    (link): link is SeoLinkTag => 'rel' in link && link.rel === 'canonical' && !!link.href,
+  );
+  if (canonicalLink !== undefined && absoluteUrl(canonicalLink.href, origin) !== null) {
+    // An extra canonical link overrides the derived canonical everywhere, og:url included.
+    canonical = absoluteUrl(canonicalLink.href, origin);
+  } else if (merged.canonical === false) {
     canonical = null;
   } else if (typeof merged.canonical === 'string') {
     canonical = url(merged.canonical, 'canonical');
@@ -366,7 +373,6 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     let key = link.key ? `link:${link.key}` : `link:${link.rel}:${href}`;
     if (link.rel === 'canonical') {
       key = 'link:canonical';
-      canonical = href;
     } else if (link.rel === 'alternate' && link.hreflang) {
       key = `link:alternate:${link.hreflang}`;
     }

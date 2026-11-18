@@ -246,6 +246,8 @@ describe('resolveHead', () => {
     expect(value(head, 'meta:property:og:type')).toBe('article');
     expect(count('link:canonical')).toBe(1);
     expect(value(head, 'link:canonical')).toBe('https://x.test/elsewhere');
+    expect(value(head, 'meta:property:og:url')).toBe('https://x.test/elsewhere');
+    expect(head.canonical).toBe('https://x.test/elsewhere');
     expect(count('link:alternate:fr')).toBe(1);
     expect(value(head, 'link:alternate:fr')).toBe('https://x.test/fr-2');
   });
