@@ -4,14 +4,35 @@
   "description": "Layered SEO and AEO head management for Angular SSR and SPA lifecycles",
   "license": "MIT",
   "author": "Joseph R. Quinn",
+  "homepage": "https://github.com/quinnjr/ngx-seo#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quinnjr/ngx-seo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/quinnjr/ngx-seo/issues"
+  },
   "keywords": [
     "angular",
+    "angular-seo",
     "seo",
     "aeo",
+    "answer-engine-optimization",
+    "geo",
     "ssr",
+    "angular-ssr",
+    "hydration",
     "json-ld",
+    "structured-data",
+    "schema-org",
     "open-graph",
-    "meta"
+    "twitter-card",
+    "meta-tags",
+    "canonical",
+    "hreflang",
+    "robots",
+    "head",
+    "signals"
   ],
   "type": "module",
   "sideEffects": false,
