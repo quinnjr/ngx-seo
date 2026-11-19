@@ -509,4 +509,18 @@ describe('mergeLayers', () => {
   it('treats whitespace-only text as no opinion', () => {
     expect(mergeLayers([{ title: 'T', canonical: '/c' }, { title: '  ', canonical: ' ' }])).toMatchObject({ title: 'T', canonical: '/c' });
   });
+
+  it('does not let blank fields or href-less alternates claim lower extra tags', () => {
+    const cases: [string, SeoConfig, SeoConfig][] = [
+      ['description', { meta: [{ name: 'description', content: 'Site desc' }] }, { description: '   ' }],
+      ['image', { meta: [{ property: 'og:image', content: '/site.png' }] }, { image: '  ' }],
+      ['og title', { meta: [{ property: 'og:title', content: 'Site' }] }, { openGraph: { title: ' ' } }],
+      ['canonical', { links: [{ rel: 'canonical', href: '/canon' }] }, { canonical: ' ' }],
+      ['alternate', { links: [{ rel: 'alternate', hreflang: 'de', href: '/de' }] }, { alternates: [{ hreflang: 'de', href: '' }] }],
+    ];
+    for (const [label, lower, higher] of cases) {
+      const merged = mergeLayers([lower, higher]);
+      expect([...(merged.meta ?? []), ...(merged.links ?? [])], label).toHaveLength(1);
+    }
+  });
 });

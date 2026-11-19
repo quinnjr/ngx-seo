@@ -827,4 +827,15 @@ describe('resolveHead', () => {
       expect(onError, label).toHaveBeenCalledTimes(1);
     }
   });
+
+  it('catches script URLs hidden by tabs, newlines or leading control characters in URL meta', () => {
+    const head = resolve({
+      meta: [
+        { property: 'al:ios:url', content: 'java\tscript:alert(1)' },
+        { property: 'al:android:url', content: 'java\nscript:alert(1)' },
+        { name: 'msapplication-TileImage', content: '\x01javascript:alert(1)' },
+      ],
+    });
+    expect(head.tags.some((t) => /script:alert/.test((t.attrs['content'] ?? '').replace(/[\t\n\r]/g, '')))).toBe(false);
+  });
 });

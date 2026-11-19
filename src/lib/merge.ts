@@ -443,8 +443,9 @@ function hasMediaItem(value: unknown): boolean {
   );
 }
 
+/** The same rule as merging: undefined, '' and whitespace-only text have no opinion. */
 function isSet(value: unknown): boolean {
-  return value !== undefined && value !== '';
+  return value !== undefined && !(typeof value === 'string' && value.trim() === '');
 }
 
 /**
@@ -457,7 +458,7 @@ function releaseClaimedExtras(result: Bag, layer: Bag): void {
   for (const [field, metas] of Object.entries(FIELD_META)) {
     const value = layer[field];
     // An image without a URL has no opinion, so it claims nothing.
-    const imageWithoutUrl = field === 'image' && isPlainObject(value) && !text(value['url']);
+    const imageWithoutUrl = field === 'image' && isPlainObject(value) && !isSet(value['url']);
     if (isSet(value) && !imageWithoutUrl) {
       claims.push(...metas);
     }
@@ -517,6 +518,8 @@ function releaseClaimedExtras(result: Bag, layer: Bag): void {
     const hreflangs = new Set(
       (isPlainObject(alternates) ? [alternates] : Array.isArray(alternates) ? alternates : [])
         .filter(isPlainObject)
+        // An alternate without an href has no opinion (it is skipped when merging), so it claims nothing.
+        .filter((item) => isSet(item['href']) && item['href'] !== null)
         .map((item) => text(item['hreflang'])?.toLowerCase())
         .filter((value): value is string => value !== undefined),
     );

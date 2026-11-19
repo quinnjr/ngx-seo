@@ -742,7 +742,9 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       }
       // Never emit a script or data URL, whatever the tag.
       // A script or data URL is never emitted where a URL is expected.
-      if ((holdsUrl(identity) || httpEquiv?.toLowerCase() === 'refresh') && UNSAFE_SCHEME.test(content)) {
+      // As a URL parser reads it: leading control characters and spaces dropped, tabs and newlines removed.
+      const asParsed = content.replace(/^[\x00-\x20]+/, '').replace(/[\t\n\r]/g, '');
+      if ((holdsUrl(identity) || httpEquiv?.toLowerCase() === 'refresh') && UNSAFE_SCHEME.test(asParsed)) {
         droppedUrls.push(`meta[${index}]`);
         return;
       }
