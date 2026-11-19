@@ -305,6 +305,16 @@ const OWNED_META_NAMES = new Set(['description', 'keywords', 'author', 'robots',
 /** Script-capable or inline URL schemes, never emitted in any meta content. */
 const UNSAFE_SCHEME = /^\s*(javascript|vbscript|data):/i;
 
+/**
+ * Meta names that hold a URL beyond the known URL_META list: app links
+ * (`al:*:url`, `twitter:app:url:*`), anything named `*url*` or `*image`, and
+ * `msapplication-*` tiles. Text meta (descriptions, titles, alt text) is
+ * never scheme-checked, so "JavaScript: The Definitive Guide" stays.
+ */
+function holdsUrl(identity: string | undefined): boolean {
+  return identity !== undefined && (URL_META.has(identity) || /url|image$|^msapplication-/i.test(identity));
+}
+
 /** Media list items: a list of objects or bare URLs, or a single object or URL. */
 function mediaItems<T>(value: unknown): T[] {
   const list = typeof value === 'string' || isObject(value) ? [value] : Array.isArray(value) ? value : [];
@@ -721,7 +731,8 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
         return;
       }
       // Never emit a script or data URL, whatever the tag.
-      if (UNSAFE_SCHEME.test(content)) {
+      // A script or data URL is never emitted where a URL is expected.
+      if ((holdsUrl(identity) || httpEquiv?.toLowerCase() === 'refresh') && UNSAFE_SCHEME.test(content)) {
         droppedUrls.push(`meta[${index}]`);
         return;
       }
@@ -776,7 +787,8 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
         current.attrs = { ...current.attrs, content: ogImage };
       }
     }
-    if (list.replaced.has('meta:property:og:image') && twText.imageAlt === undefined && derived('meta:name:twitter:image:alt')) {
+    const imageReplaced = list.replaced.has('meta:property:og:image') || list.replaced.has('meta:name:twitter:image');
+    if (imageReplaced && twText.imageAlt === undefined && derived('meta:name:twitter:image:alt')) {
       list.remove('meta:name:twitter:image:alt');
     }
     const card = list.find('meta:name:twitter:card');

@@ -483,11 +483,13 @@ describe('resolveHead', () => {
         { property: 'OG:IMAGE', content: 'javascript:alert(1)' },
         { name: 'twitter:url', content: 'javascript:x' },
         { property: 'og:see_also', content: '/related' },
-        { name: 'custom', content: ' JavaScript:alert(1)' },
+        { name: 'custom', content: 'JavaScript: a text meta, not a URL' },
         { name: 'theme-color', content: '#fff' },
       ],
     });
-    expect(head.tags.some((t) => /javascript:/i.test(t.attrs['content'] ?? ''))).toBe(false);
+    // URL-valued tags never carry a script URL; text meta is left as written.
+    expect(head.tags.some((t) => (t.attrs['content'] ?? '').startsWith('javascript:'))).toBe(false);
+    expect(value(head, 'meta:name:custom')).toBe('JavaScript: a text meta, not a URL');
     expect(value(head, 'meta:property:og:see_also')).toBe('https://x.test/related');
     expect(value(head, 'meta:name:theme-color')).toBe('#fff');
   });
@@ -766,4 +768,35 @@ describe('resolveHead', () => {
       expect(onError, label).toHaveBeenCalledTimes(1);
     }
   });
+
+  it('keeps text meta that merely starts with a scheme-like word', () => {
+    const head = resolveHead(
+      mergeLayers([
+        {
+          meta: [
+            { property: 'og:title', content: 'JavaScript: The Definitive Guide' },
+            { name: 'description', content: 'Data: what we collect and why' },
+            { property: 'al:web:url', content: 'javascript:alert(1)' },
+            { name: 'msapplication-TileImage', content: 'data:image/png;base64,AAAA' },
+          ],
+        },
+      ]),
+      site,
+      { path: '/', origin: null },
+    );
+    expect(value(head, 'meta:property:og:title')).toBe('JavaScript: The Definitive Guide');
+    expect(value(head, 'meta:name:description')).toBe('Data: what we collect and why');
+    expect(head.tags.some((t) => /javascript:alert|data:image/.test(t.attrs['content'] ?? ''))).toBe(false);
+  });
+
+  it('drops the derived twitter:image:alt when an extra twitter:image replaces the image', () => {
+    const head = resolveHead(
+      mergeLayers([{ image: { url: '/og.png', alt: 'Company logo' } }, { meta: [{ name: 'twitter:image', content: '/product-photo.png' }] }]),
+      site,
+      { path: '/', origin: null },
+    );
+    expect(value(head, 'meta:name:twitter:image')).toBe('https://x.test/product-photo.png');
+    expect(value(head, 'meta:name:twitter:image:alt')).toBeUndefined();
+  });
 });
+

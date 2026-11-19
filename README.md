@@ -287,9 +287,11 @@ Only where the merged config leaves a value unset:
   holds a URL (`og:url`, `og:image*`, `og:video*`, `og:audio*`,
   `og:see_also`, `twitter:image`, `twitter:url`, `twitter:player*`, matched
   case-insensitively). A value that cannot be made absolute, or is not
-  `http(s)`, is dropped and reported by diagnostics. No extra `meta`
-  content starting with `javascript:`, `vbscript:` or `data:` is ever
-  emitted.
+  `http(s)`, is dropped and reported by diagnostics. Extra `meta` that holds
+  a URL never carries a `javascript:`, `vbscript:` or `data:` value. That
+  covers the list above, refresh, anything named `*url*` or `*image`, and
+  `msapplication-*`. Text meta such as a title "JavaScript: The Definitive
+  Guide" is left as written.
 
 ## SeoConfig reference
 
