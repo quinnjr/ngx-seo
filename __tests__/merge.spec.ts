@@ -523,4 +523,16 @@ describe('mergeLayers', () => {
       expect([...(merged.meta ?? []), ...(merged.links ?? [])], label).toHaveLength(1);
     }
   });
+
+  it('keeps the inherited image when a higher image has only a blank URL', () => {
+    const merged = mergeLayers([{ image: { url: '/default.png', width: 1200 } }, { image: { url: '   ', alt: 'Post cover' } }]);
+    expect(merged.image).toEqual({ url: '/default.png', width: 1200 });
+  });
+
+  it('merges bots case-insensitively', () => {
+    expect(mergeLayers([{ bots: { Googlebot: { maxSnippet: 50 } } }, { bots: { googlebot: { index: false } } }]).bots).toEqual({
+      googlebot: { maxSnippet: 50, index: false },
+    });
+    expect(mergeLayers([{ bots: { Googlebot: 'noindex' } }, { bots: { googlebot: null } }]).bots).toEqual({});
+  });
 });

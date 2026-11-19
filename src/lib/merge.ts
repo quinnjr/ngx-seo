@@ -324,7 +324,8 @@ function mergeFields(
 ): void {
   for (const [rawKey, rawValue] of safeEntries(source)) {
     // Header names are case-insensitive, so a null can remove any casing.
-    const key = path === 'http.headers' ? rawKey.toLowerCase() : rawKey;
+    // Header and crawler names are case-insensitive, so any casing merges and a null removes it.
+    const key = path === 'http.headers' || path === 'bots' ? rawKey.toLowerCase() : rawKey;
     // Checked again after normalisation: "__PROTO__" must not become "__proto__".
     if (UNSAFE_KEYS.has(key)) {
       continue;
@@ -337,7 +338,7 @@ function mergeFields(
       continue;
     }
     // An image without a URL (e.g. an empty CMS field) has no opinion.
-    if (here === 'image' && isPlainObject(value) && !text(value['url'])) {
+    if (here === 'image' && isPlainObject(value) && !isSet(value['url'])) {
       continue;
     }
     if (value === null) {
