@@ -120,7 +120,7 @@ export const SEO_TAKEOVER_TIMEOUT = new InjectionToken<number>('SEO_TAKEOVER_TIM
   factory: () => 1000,
 });
 
-/** The router URL with named-outlet segments removed: one primary page, one canonical. */
+/** The router URL without named-outlet segments or fragment: one primary page, one canonical. */
 function primaryUrl(router: Router): string {
   try {
     const tree = router.parseUrl(router.url);
@@ -134,9 +134,11 @@ function primaryUrl(router: Router): string {
       }
     };
     strip(tree.root);
+    // The fragment is an in-page position, not a different page.
+    tree.fragment = null;
     return router.serializeUrl(tree);
   } catch {
-    return router.url;
+    return router.url.split('#')[0];
   }
 }
 

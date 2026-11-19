@@ -165,5 +165,32 @@ describe('diagnostics in the Seo service', () => {
     expect(description).toHaveLength(1);
     expect(String(description[0][0])).toContain('(/p)');
   });
+
+  it('treats fragment-only navigation as the same page', async () => {
+    @Component({ selector: 'seo-doc', template: '' })
+    class Doc {}
+    const urls: string[] = [];
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([{ path: 'doc', component: Doc, data: { seo: { title: 'Doc' } } }]),
+        provideSeo({
+          ...site,
+          defaults: (ctx) => {
+            urls.push(ctx.url);
+            return {};
+          },
+        }),
+      ],
+    });
+    TestBed.inject(Seo);
+    const harness = await RouterTestingHarness.create();
+    for (const url of ['/doc', '/doc#a', '/doc#b']) {
+      await harness.navigateByUrl(url);
+      TestBed.tick();
+    }
+    expect(urls.some((url) => url.includes('#'))).toBe(false);
+    expect(warn.mock.calls.filter((call: unknown[]) => String(call[0]).includes('No description'))).toHaveLength(1);
+  });
 });
 
