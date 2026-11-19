@@ -210,12 +210,7 @@ export class Seo {
   /** Routes currently attached to the router state; null when no router is tracked. */
   private readonly attached = signal<ReadonlySet<ActivatedRoute | Route> | null>(null);
   private nextOrder = 0;
-  /** Bumped to re-evaluate contributions that were waiting for a required input. */
-  private readonly retry = signal(0);
-  private retries = 0;
   private reconcileScheduled = false;
-  /** Set while computing when a contribution is waiting for a required input. */
-  private notReady = false;
   /** NavigationEnd events seen; the second is the first client navigation. */
   private navigations = 0;
   private nextHostId = 0;
@@ -249,7 +244,6 @@ export class Seo {
 
   /** The fully derived head for the current page. */
   readonly resolved: Signal<ResolvedHead> = computed(() => {
-    this.notReady = false;
     this.computing++;
     try {
       try {
@@ -274,11 +268,6 @@ export class Seo {
       const head = this.resolved();
       untracked(() => {
         this.flushErrors();
-        if (this.notReady) {
-          this.retryNotReady();
-        } else {
-          this.retries = 0;
-        }
         if (this.ready) {
           if (isPlatformBrowser(this.platformId)) {
             // Apply after the render pass: components created while rendering (children,
@@ -349,10 +338,9 @@ export class Seo {
     const source: WritableSignal<Source> = signal(config);
     const patches = signal<SeoConfig>({});
     const value = computed<SeoConfig>(() => {
+      // A function reading a required input that is not bound yet is re-evaluated
+      // when it is bound: Angular tracks the input before throwing NG0950.
       const current = source();
-      if (typeof current === 'function') {
-        this.retry();
-      }
       let base: SeoConfig = {};
       if (typeof current === 'function') {
         try {
@@ -599,13 +587,8 @@ export class Seo {
     const contributions = [...copies, ...live]
       .sort((a, b) => a.priority - b.priority || a.order - b.order)
       .map((item) => item.value())
-      .filter((config) => {
-        if (config === NOT_READY) {
-          this.notReady = true;
-          return false;
-        }
-        return true;
-      });
+      // A contribution waiting for a required input contributes nothing yet.
+      .filter((config) => config !== NOT_READY);
     const layers: SeoConfig[] = [...this.routeLayers(), ...contributions];
     const env = { path: this.path(), origin: this.origin(), basePath: this.basePath };
     const all = [this.defaultsLayer(layers, env), ...layers];
@@ -701,20 +684,8 @@ export class Seo {
       // No shown routed component owns it (a widget rendered dynamically or
       // deferred inside a page, or a component outside the outlet). Scope it
       // to the page that was active when it was made.
-      if (item.creationRoute !== null) {
-        return attached.has(item.creationRoute);
-      }
-      // Made before any page was routed: it follows the nearest enclosing
-      // route injector, or applies app-wide (a shell component).
-      let current: unknown = (item.injector as { parent?: unknown }).parent;
-      while (current !== null && current !== undefined && current !== this.rootInjector) {
-        const enclosing = routeInjectors.get(current);
-        if (enclosing !== undefined) {
-          return attached.has(enclosing);
-        }
-        current = (current as { parent?: unknown }).parent;
-      }
-      return true;
+      // Made before any page was routed (a shell component): app-wide.
+      return item.creationRoute === null || attached.has(item.creationRoute);
     }
     return true;
   }
@@ -921,15 +892,6 @@ export class Seo {
       },
       { injector: this.injector },
     );
-  }
-
-  /** Re-evaluates waiting contributions once the current render pass has bound inputs. */
-  private retryNotReady(): void {
-    if (this.retries >= 3) {
-      return;
-    }
-    this.retries++;
-    queueMicrotask(() => this.retry.update((n) => n + 1));
   }
 
   private writeResponse(head: ResolvedHead): void {

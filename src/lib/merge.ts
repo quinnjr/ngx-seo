@@ -367,15 +367,16 @@ const FIELD_META: Record<string, string[]> = {
   image: ['og:image*', 'twitter:image*'],
   canonical: ['og:url'],
 };
+// Each field also releases the tags derived from it (Twitter falls back to Open Graph).
 const OG_META: Record<string, string[]> = {
-  title: ['og:title'],
-  description: ['og:description'],
+  title: ['og:title', 'twitter:title'],
+  description: ['og:description', 'twitter:description'],
   type: ['og:type'],
   url: ['og:url'],
   siteName: ['og:site_name'],
   locale: ['og:locale'],
   alternateLocales: ['og:locale:alternate'],
-  images: ['og:image*'],
+  images: ['og:image*', 'twitter:image*'],
   videos: ['og:video*'],
   audio: ['og:audio*'],
 };
@@ -442,6 +443,10 @@ function releaseClaimedExtras(result: Bag, layer: Bag): void {
     }
   }
   const openGraph = layer['openGraph'];
+  if (isPlainObject(openGraph) && ['article', 'profile', 'book'].some((object) => isPlainObject(openGraph[object]))) {
+    // og:type is derived from article, profile or book data.
+    claims.push('og:type');
+  }
   if (isPlainObject(openGraph)) {
     for (const [object, table] of Object.entries(OG_NESTED_META)) {
       const nested = openGraph[object];

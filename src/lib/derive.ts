@@ -362,6 +362,13 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     return str(value);
   };
 
+  /** A list of text items; non-text items are reported and skipped. */
+  const textItems = (value: unknown, field: string): string[] =>
+    items<unknown>(value).flatMap((item) => {
+      const text = textField(item, field);
+      return text === undefined ? [] : [text];
+    });
+
   /** A size: a finite number or a string of digits; anything else is reported and ignored. */
   const numberField = (value: unknown, field: string): string | undefined => {
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -377,7 +384,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   };
 
   const url = (value: unknown, field: string): string | null => {
-    const text = str(value);
+    const text = textField(value, field);
     if (text === undefined) {
       return null;
     }
@@ -484,7 +491,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       onError(new Error('ngx-seo: ignored keywords: expected a list or text'));
     }
     const keywords = Array.isArray(merged.keywords)
-      ? merged.keywords.filter((word): word is string => typeof word === 'string' && word !== '').join(', ')
+      ? textItems(merged.keywords, 'keywords').join(', ')
       : str(merged.keywords);
     list.name('keywords', keywords);
     list.name('author', textField(merged.author, 'author'));
@@ -552,11 +559,11 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     list.property('og:description', ogText.description ?? description);
     const derivedType = isObject(og.article) ? 'article' : isObject(og.profile) ? 'profile' : isObject(og.book) ? 'book' : 'website';
     list.property('og:type', ogText.type ?? derivedType);
-    list.property('og:url', (og.url ? url(og.url, 'openGraph.url') : null) ?? canonical);
+    list.property('og:url', (og.url !== undefined && og.url !== null ? url(og.url, 'openGraph.url') : null) ?? canonical);
     list.property('og:site_name', ogText.siteName ?? site.siteName);
     list.property('og:locale', ogText.locale);
-    for (const locale of items<string>(og.alternateLocales)) {
-      list.property('og:locale:alternate', str(locale));
+    for (const locale of textItems(og.alternateLocales, 'openGraph.alternateLocales')) {
+      list.property('og:locale:alternate', locale);
     }
   });
   section(() => {
@@ -580,10 +587,10 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       seen.add(src);
       images.push({ ...image, url: src });
       list.property('og:image', src);
-      list.property('og:image:type', str(image.type));
+      list.property('og:image:type', textField(image.type, `${field}.type`));
       list.property('og:image:width', numberField(image.width, `${field}.width`));
       list.property('og:image:height', numberField(image.height, `${field}.height`));
-      list.property('og:image:alt', str(image.alt));
+      list.property('og:image:alt', textField(image.alt, `${field}.alt`));
     }
   });
   const media = (value: unknown, prop: 'og:video' | 'og:audio', field: string): void => {
@@ -615,12 +622,12 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     list.property('article:published_time', dateText(a.publishedTime));
     list.property('article:modified_time', dateText(a.modifiedTime));
     list.property('article:expiration_time', dateText(a.expirationTime));
-    for (const author of items<string>(a.authors)) {
-      list.property('article:author', str(author));
+    for (const author of textItems(a.authors, 'openGraph.article.authors')) {
+      list.property('article:author', author);
     }
-    list.property('article:section', str(a.section));
-    for (const tag of items<string>(a.tags)) {
-      list.property('article:tag', str(tag));
+    list.property('article:section', textField(a.section, 'openGraph.article.section'));
+    for (const tag of textItems(a.tags, 'openGraph.article.tags')) {
+      list.property('article:tag', tag);
     }
   });
   section(() => {
@@ -636,18 +643,18 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     if (!isObject(og.book)) {
       return;
     }
-    for (const author of items<string>(og.book.authors)) {
-      list.property('book:author', str(author));
+    for (const author of textItems(og.book.authors, 'openGraph.book.authors')) {
+      list.property('book:author', author);
     }
     list.property('book:isbn', str(og.book.isbn));
     list.property('book:release_date', dateText(og.book.releaseDate));
-    for (const tag of items<string>(og.book.tags)) {
-      list.property('book:tag', str(tag));
+    for (const tag of textItems(og.book.tags, 'openGraph.book.tags')) {
+      list.property('book:tag', tag);
     }
   });
 
   // Twitter
-  const explicitTwitterImage = tw.image ? url(tw.image, 'twitter.image') : null;
+  const explicitTwitterImage = tw.image !== undefined && tw.image !== null ? url(tw.image, 'twitter.image') : null;
   section(() => {
     const twitterImage = explicitTwitterImage ?? images[0]?.url ?? null;
     list.name('twitter:card', twText.card ?? (twitterImage ? 'summary_large_image' : 'summary'));
@@ -662,7 +669,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   // Extra meta
   section(() => {
     objects<SeoMetaTag>(merged.meta).forEach((meta, index) => {
-      let content = typeof meta.content === 'string' ? meta.content : undefined;
+      let content = textField(meta.content, `meta[${index}].content`);
       const identity = (str(meta.name) ?? str(meta.property))?.toLowerCase();
       if (content === undefined) {
         return;

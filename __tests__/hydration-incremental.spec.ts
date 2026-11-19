@@ -422,22 +422,43 @@ describe('incremental hydration', () => {
   it('carries a keyed route-service contribution', async () => {
     @Injectable()
     class ProductSeo {
-      readonly seo = injectSeo({ description: 'svc-desc' }, { key: 'product' });
+      private readonly server = isPlatformServer(inject(PLATFORM_ID));
+      // The config differs between server and browser, so only the key can match it to its copy.
+      readonly seo = injectSeo(
+        { description: this.server ? 'svc-desc' : 'svc-desc-browser', jsonLd: [{ '@type': 'Thing', name: 'product-node' }] },
+        { key: 'product' },
+      );
+    }
+    @Injectable()
+    class OtherSeo {
+      readonly seo = injectSeo({ keywords: ['other'] });
+    }
+    @Component({ selector: 'eager-k', template: '<p>e</p>' })
+    class EagerK {
+      readonly svc = inject(ProductSeo);
     }
     @Component({ selector: 'keyed-x', template: '<p>k</p>' })
     class KeyedX {
       readonly svc = inject(ProductSeo);
     }
-    @Component({ selector: 'page-k', imports: [KeyedX], template: '@defer (hydrate on interaction) { <keyed-x /> }' })
-    class PageK {}
+    @Component({
+      selector: 'page-k',
+      imports: [KeyedX, EagerK],
+      template: '@defer (hydrate on interaction) { <keyed-x /> } <eager-k />',
+    })
+    class PageK {
+      readonly other = inject(OtherSeo);
+    }
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { appRef } = await hydrate(
       App,
-      [{ path: 'k', component: PageK, providers: [ProductSeo], data: { seo: { description: 'route-desc' } } }],
+      [{ path: 'k', component: PageK, providers: [ProductSeo, OtherSeo], data: { seo: { description: 'route-desc' } } }],
       '/k',
       { baseUrl: 'https://x.test' } as typeof site,
     );
-    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('svc-desc');
+    // The keyed service continued its own copy: the browser value wins and its node is not doubled.
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('svc-desc-browser');
+    expect((document.head.querySelector('script[type="application/ld+json"]')?.textContent ?? '').match(/product-node/g)).toHaveLength(1);
     errors.mockRestore();
     appRef.destroy();
     destroyPlatform();

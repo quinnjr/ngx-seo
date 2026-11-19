@@ -675,5 +675,28 @@ describe('resolveHead', () => {
     expect(overridden.robots).toBe('index, follow');
     expect(resolve({ meta: [{ name: 'robots', content: 'noindex' }] }).robots).toBe('noindex');
   });
-});
 
+  it('reports wrongly typed values in every field it reads', () => {
+    const onError = vi.fn();
+    resolveHead(
+      {
+        meta: [{ name: 'x', content: 5 }],
+        image: { url: '/a.png', alt: 5, type: 7 },
+        twitter: { image: 5 },
+        openGraph: { url: 5, article: { section: 5, tags: [5] } },
+        keywords: [5],
+      } as never,
+      site,
+      { path: '/', origin: null, onError },
+    );
+    expect(onError).toHaveBeenCalledTimes(8);
+  });
+
+  it('rejects bots named like Twitter or Open Graph tags', () => {
+    const onError = vi.fn();
+    const head = resolveHead({ bots: { 'twitter:card': 'noindex', 'og:type': 'noindex' } }, site, { path: '/', origin: null, onError });
+    expect(head.tags.filter((t) => t.attrs['name'] === 'twitter:card').map((t) => t.attrs['content'])).toEqual(['summary']);
+    expect(head.tags.some((t) => t.attrs['name'] === 'og:type')).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(2);
+  });
+});

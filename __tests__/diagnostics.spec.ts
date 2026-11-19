@@ -145,5 +145,25 @@ describe('diagnostics in the Seo service', () => {
     expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content')).toBe('from child');
     expect(warn).not.toHaveBeenCalled();
   });
+
+  it('warns once in a routed app about a page without a description', async () => {
+    @Component({ selector: 'seo-nodesc', template: '' })
+    class NoDescription {}
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([{ path: 'p', component: NoDescription, data: { seo: { title: 'T' } } }]),
+        provideSeo(site),
+      ],
+    });
+    TestBed.inject(Seo);
+    const harness = await RouterTestingHarness.create();
+    await harness.navigateByUrl('/p');
+    TestBed.tick();
+    TestBed.tick();
+    const description = warn.mock.calls.filter((call: unknown[]) => String(call[0]).includes('No description'));
+    expect(description).toHaveLength(1);
+    expect(String(description[0][0])).toContain('(/p)');
+  });
 });
 

@@ -440,4 +440,25 @@ describe('mergeLayers', () => {
     expect(merged.links).toEqual([]);
     expect(merged.alternates).toEqual([{ hreflang: 'de', href: '/de-new' }]);
   });
+
+  it('lets Open Graph fields release the lower extra tags their derivations feed', () => {
+    const merged = mergeLayers([
+      {
+        meta: [
+          { name: 'twitter:image', content: '/default.jpg' },
+          { name: 'twitter:title', content: 'Site' },
+          { name: 'twitter:description', content: 'Site desc' },
+          { property: 'og:type', content: 'website' },
+          { name: 'theme-color', content: '#fff' },
+        ],
+      },
+      { openGraph: { images: [{ url: '/page.jpg' }], title: 'Page', description: 'Page desc', article: { section: 'News' } } },
+    ]);
+    expect(merged.meta).toEqual([{ name: 'theme-color', content: '#fff' }]);
+  });
+
+  it('lets bots release lower extra robots meta for the same crawler', () => {
+    const merged = mergeLayers([{ meta: [{ name: 'googlebot', content: 'index' }] }, { bots: { googlebot: { index: false } } }]);
+    expect(merged.meta).toEqual([]);
+  });
 });

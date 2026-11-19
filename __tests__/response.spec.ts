@@ -68,4 +68,12 @@ describe('ResponseWriter', () => {
     new ResponseWriter(init, () => {}).write({ status: 410, headers: {} });
     expect(init.status).toBe(410);
   });
+
+  it('accepts Latin-1 header values', () => {
+    const init: ResponseInit = { headers: new Headers() };
+    const onError = vi.fn();
+    new ResponseWriter(init, onError).write({ headers: { 'X-Note': 'café' } });
+    expect((init.headers as Headers).get('X-Note')).toBe('café');
+    expect(onError).not.toHaveBeenCalled();
+  });
 });
