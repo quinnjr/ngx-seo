@@ -1,5 +1,6 @@
 import {
   ApplicationRef,
+  type ComponentRef,
   DestroyRef,
   DOCUMENT,
   EnvironmentInjector,
@@ -25,6 +26,7 @@ import {
 } from '@angular/core';
 import { APP_BASE_HREF, isPlatformBrowser, isPlatformServer } from '@angular/common';
 import {
+  ChildrenOutletContexts,
   NavigationCancel,
   NavigationEnd,
   NavigationError,
@@ -100,8 +102,7 @@ interface Contribution {
   readonly route: ActivatedRoute | Route | null;
   /** A non-root service injector, resolved to its route when evaluated. */
   readonly injector: EnvironmentInjector | null;
-  /** The page component active when an injector-bound contribution was made. */
-  readonly fallbackComponent: unknown;
+
   readonly priority: number;
   readonly order: number;
   readonly value: Signal<SeoConfig>;
@@ -217,6 +218,9 @@ export class Seo {
   private nextHostId = 0;
   private readonly transferState = inject(TransferState);
   private readonly rootInjector = inject(EnvironmentInjector);
+  private readonly outletContexts = inject(ChildrenOutletContexts, { optional: true });
+  /** Injector-bound contributions found to belong to a routed component. */
+  private readonly routedOwners = new WeakSet<Contribution>();
   /**
    * Browser only: server copies of component contributions whose components
    * have not hydrated yet (for example inside `@defer (hydrate …)`).
@@ -434,7 +438,6 @@ export class Seo {
       hostId,
       route: boundRoute,
       injector,
-      fallbackComponent: injector === null ? null : (this.deepestPrimaryRoute()?.component ?? null),
       priority: options.priority ?? 0,
       order: order ?? this.nextOrder++,
       value,
@@ -679,18 +682,16 @@ export class Seo {
         }
         current = (current as { parent?: unknown }).parent;
       }
-      // No route owns it (e.g. a module imported by a standalone page): it
-      // applies wherever the page component that was active when it was made
-      // is shown, on every visit and on every route using that component.
-      if (item.fallbackComponent === null) {
+      // No route owns it: it comes from a module a standalone component imports.
+      // If a routed component owns it, it applies while that component is shown
+      // (a layout across its child pages, a page on every visit and route).
+      // A component outside the router outlet makes it app-wide.
+      const routed = this.routedOwnerShown(item.injector);
+      if (routed) {
+        this.routedOwners.add(item);
         return true;
       }
-      for (const entry of attached) {
-        if ('snapshot' in entry && entry.component === item.fallbackComponent) {
-          return true;
-        }
-      }
-      return false;
+      return !this.routedOwners.has(item);
     }
     return true;
   }
@@ -715,15 +716,29 @@ export class Seo {
     return owners;
   }
 
-  /** The deepest primary route in the current router state, or null without a router. */
-  private deepestPrimaryRoute(): ActivatedRoute | null {
-    let route: ActivatedRoute | null = this.router?.routerState.root ?? null;
-    let deepest: ActivatedRoute | null = null;
-    while (route !== null) {
-      deepest = route;
-      route = route.children.find((child) => child.outlet === PRIMARY_OUTLET) ?? null;
+  /**
+   * Whether a component currently shown in a primary router outlet owns the
+   * injector: the component's environment injector is the injector or one of
+   * its ancestors.
+   */
+  private routedOwnerShown(injector: EnvironmentInjector): boolean {
+    const ancestors = new Set<unknown>();
+    let current: unknown = injector;
+    while (current !== null && current !== undefined && current !== this.rootInjector) {
+      ancestors.add(current);
+      current = (current as { parent?: unknown }).parent;
     }
-    return deepest !== null && deepest.parent !== null ? deepest : null;
+    let context = this.outletContexts?.getContext(PRIMARY_OUTLET) ?? null;
+    while (context !== null) {
+      // `activated` is the outlet's ComponentRef; the outlet exposes no public accessor for it.
+      const activated = (context.outlet as unknown as { activated?: ComponentRef<unknown> | null } | null)?.activated;
+      const environment = activated?.injector.get(EnvironmentInjector, null);
+      if (environment !== null && environment !== undefined && ancestors.has(environment)) {
+        return true;
+      }
+      context = context.children.getContext(PRIMARY_OUTLET);
+    }
+    return false;
   }
 
   /**

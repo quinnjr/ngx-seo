@@ -10,13 +10,14 @@ import {
   RouterStateSnapshot,
   Routes,
   TitleStrategy,
+  Router,
   RouterModule,
   RouterOutlet,
   provideRouter,
 } from '@angular/router';
 import { injectSeo } from '../src/lib/inject-seo';
 import { HeadReconciler } from '../src/lib/reconciler';
-import { ApplicationRef, Injectable, NgModule, input, provideEnvironmentInitializer } from '@angular/core';
+import { ApplicationRef, Injectable, NgModule, input, provideEnvironmentInitializer, signal } from '@angular/core';
 import { faqPage } from '../src/lib/builders';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { provideSeo } from '../src/lib/provide-seo';
@@ -530,6 +531,73 @@ describe('route lifecycle', () => {
         }
       }
       await leaves([{ path: 'lazy', loadChildren: () => Promise.resolve(EagerModule) }], '/lazy');
+    });
+
+    it('follows a layout that imports the service module across its child pages', async () => {
+      @NgModule({ providers: [DraftSeo] })
+      class ShopModule {}
+      @Component({ selector: 'seo-shop-layout', imports: [ShopModule, RouterOutlet], template: '<router-outlet />' })
+      class ShopLayout {
+        readonly service = inject(DraftSeo);
+      }
+      const { go } = await setup([
+        {
+          path: 'shop',
+          component: ShopLayout,
+          children: [
+            { path: 'a', component: Page },
+            { path: 'b', component: Page },
+          ],
+        },
+        { path: 'home', component: Page },
+      ]);
+      const seen: (string | null)[] = [];
+      for (const url of ['/shop/a', '/shop/b', '/home', '/shop/b']) {
+        await go(url);
+        seen.push(meta('robots'));
+      }
+      expect(seen).toEqual(['noindex', 'noindex', null, 'noindex']);
+    });
+
+    it('applies app-wide for a module service of a component outside the router outlet', async () => {
+      @Injectable()
+      class WidgetSeo {
+        readonly seo = injectSeo({ author: 'widget' });
+      }
+      @NgModule({ providers: [WidgetSeo] })
+      class WidgetModule {}
+      @Component({ selector: 'seo-widget', imports: [WidgetModule], template: '' })
+      class Widget {
+        readonly service = inject(WidgetSeo);
+      }
+      @Component({ selector: 'seo-other', template: '' })
+      class OtherPage {}
+      const show = signal(false);
+      @Component({ selector: 'seo-root', imports: [Widget, RouterOutlet], template: '@if (show()) { <seo-widget /> } <router-outlet />' })
+      class Root {
+        readonly show = show;
+      }
+      TestBed.configureTestingModule({
+        providers: [
+          provideZonelessChangeDetection(),
+          provideRouter([
+            { path: 'a', component: Page },
+            { path: 'b', component: OtherPage },
+          ]),
+          provideSeo({ baseUrl: 'https://x.test', diagnostics: 'off' }),
+        ],
+      });
+      const fixture = TestBed.createComponent(Root);
+      const router = TestBed.inject(Router);
+      await router.navigateByUrl('/a');
+      await fixture.whenStable();
+      show.set(true);
+      await fixture.whenStable();
+      const seen = [meta('author')];
+      await router.navigateByUrl('/b');
+      await fixture.whenStable();
+      seen.push(meta('author'));
+      expect(seen).toEqual(['widget', 'widget']);
     });
 
     it('follows a standalone page that imports the service module, on every visit and route', async () => {

@@ -197,9 +197,11 @@ when you come back.
   this is what stops them leaking onto other pages. This holds even when the
   service is created while the route's injector is being built (an
   environment initializer, a lazy NgModule constructor).
-- **In a service from a module that a standalone page imports,** that is
-  every route showing the page component that was active when the
-  contribution was made.
+- **In a service from a module that a standalone component imports,** it
+  follows that component. If the component is routed, the contribution
+  applies while the component is shown: a page on every visit and route, a
+  layout across all its child pages. If the component sits outside the
+  router outlet (a shell widget), it applies app-wide.
 - **In a root service,** the contribution applies everywhere until it is
   destroyed.
 
