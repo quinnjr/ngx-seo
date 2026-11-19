@@ -4,7 +4,7 @@ import { article, injectSeo, organization, provideSeo, type SeoConfig, type SeoS
 
 declare const post: { image?: string; alt?: string; excerpt?: string; tags?: string[] };
 declare const env: { baseUrl?: string };
-declare const cms: { id?: string; type?: string };
+declare const cms: { id?: string; type?: string; cache?: string; bot?: string };
 
 export const config: SeoConfig = {
   title: undefined,
@@ -24,3 +24,5 @@ export function setup(): void {
 }
 
 export const nodes = [organization({ '@id': cms.id, name: 'Acme' }), article({ '@type': cms.type, '@id': undefined, headline: 'H' })];
+
+export const optionalMaps: SeoConfig = { http: { headers: { 'cache-control': cms.cache } }, bots: { googlebot: cms.bot } };

@@ -132,7 +132,7 @@ export interface SeoLinkTag {
 
 export interface SeoHttp {
   status?: number | null | undefined;
-  headers?: Record<string, string | null> | null | undefined;
+  headers?: Record<string, string | null | undefined> | null | undefined;
 }
 
 /** Information handed to title-template and defaults functions. */
@@ -163,7 +163,7 @@ export interface SeoConfig {
   canonical?: string | false | null | undefined;
   robots?: RobotsDirectives | string | null | undefined;
   /** Per-crawler robots meta, keyed by crawler name (e.g. `googlebot`). */
-  bots?: Record<string, RobotsDirectives | string | null> | null | undefined;
+  bots?: Record<string, RobotsDirectives | string | null | undefined> | null | undefined;
   alternates?: readonly (SeoAlternate | SeoRemoval)[] | null | undefined;
   /** Shorthand feeding Open Graph and Twitter. */
   image?: string | SeoImage | null | undefined;

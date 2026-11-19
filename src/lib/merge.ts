@@ -220,6 +220,12 @@ function mergeKeyedList(
     }
     // Class instances (e.g. from a schema library) are copied as plain objects.
     const plain: Bag = isPlainObject(item) ? item : { ...(item as Bag) };
+    // An item without its value ('' or missing content/href, e.g. an empty CMS field) has no opinion.
+    // A value of the wrong type is kept, so derivation can report it.
+    const missing = (field: string): boolean => plain[field] === undefined || plain[field] === null || plain[field] === '';
+    if ((path === 'meta' && missing('content')) || ((path === 'alternates' || path === 'links') && missing('href'))) {
+      continue;
+    }
     const copy = cloneValue(plain);
     const key = keyOf(plain);
     if (key === undefined) {
@@ -283,22 +289,28 @@ function mergeKeyedList(
   return higherFirst ? [...fresh, ...result] : [...result, ...fresh];
 }
 
+/**
+ * Merges `source` into `target`. `identity` is the object as the caller wrote
+ * it: a class instance is read through a fresh plain copy, so cycles are
+ * tracked by the original object, never by the copy.
+ */
 function mergeObject(
   target: Bag,
   source: Bag,
   path: string,
   ancestors: Set<object>,
   onError: (error: unknown) => void,
+  identity: object = source,
 ): void {
-  if (ancestors.has(source)) {
+  if (ancestors.has(identity)) {
     onError(new Error(`ngx-seo: dropped a cyclic value at ${path || 'the top level'}`));
     return;
   }
-  ancestors.add(source);
+  ancestors.add(identity);
   try {
     mergeFields(target, source, path, ancestors, onError);
   } finally {
-    ancestors.delete(source);
+    ancestors.delete(identity);
   }
 }
 
@@ -347,7 +359,7 @@ function mergeFields(
       target[key] = listValue.filter((item) => item !== null && item !== undefined && item !== '').map((item) => cloneValue(item));
       continue;
     }
-    if (isPlainObject(value) && ancestors.has(value)) {
+    if (isPlainObject(value) && typeof rawValue === 'object' && rawValue !== null && ancestors.has(rawValue)) {
       onError(new Error(`ngx-seo: dropped a cyclic value at ${here}`));
       continue;
     }
@@ -358,7 +370,7 @@ function mergeFields(
       if (!isPlainObject(existing)) {
         target[key] = base;
       }
-      mergeObject(base, value, here, ancestors, onError);
+      mergeObject(base, value, here, ancestors, onError, rawValue as object);
       continue;
     }
     target[key] = cloneValue(value);
@@ -518,7 +530,7 @@ export function mergeLayers(layers: readonly SeoConfig[], onError: (error: unkno
     const plain = asPlain(layer);
     if (isPlainObject(plain)) {
       releaseClaimedExtras(result, plain);
-      mergeObject(result, plain, '', new Set(), onError);
+      mergeObject(result, plain, '', new Set(), onError, layer as object);
     }
   }
   return result as SeoConfig;

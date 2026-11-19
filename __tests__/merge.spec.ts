@@ -461,4 +461,40 @@ describe('mergeLayers', () => {
     const merged = mergeLayers([{ meta: [{ name: 'googlebot', content: 'index' }] }, { bots: { googlebot: { index: false } } }]);
     expect(merged.meta).toEqual([]);
   });
+
+  it('drops a cycle through a class instance where it starts, without overflowing', () => {
+    class Article {
+      publishedTime = '2024-01-01';
+      owner: unknown = this;
+    }
+    const onError = vi.fn();
+    const merged = mergeLayers([{ title: 'Page', openGraph: { article: new Article() as never } }], onError);
+    expect(merged.title).toBe('Page');
+    expect(merged.openGraph?.article?.publishedTime).toBe('2024-01-01');
+    expect(onError).toHaveBeenCalled();
+  });
+
+  it('treats a meta item without content, or a link or alternate without href, as no opinion', () => {
+    const merged = mergeLayers([
+      {
+        meta: [{ name: 'theme-color', content: '#fff' }],
+        alternates: [{ hreflang: 'de', href: '/de' }],
+        links: [{ rel: 'icon', href: '/i.png', key: 'icon' }],
+      },
+      {
+        meta: [{ name: 'theme-color', content: '' }],
+        alternates: [{ hreflang: 'de', href: '' }],
+        links: [{ rel: 'icon', href: '', key: 'icon' }],
+      },
+    ]);
+    expect(merged.meta).toEqual([{ name: 'theme-color', content: '#fff' }]);
+    expect(merged.alternates).toEqual([{ hreflang: 'de', href: '/de' }]);
+    expect(merged.links).toEqual([{ rel: 'icon', href: '/i.png', key: 'icon' }]);
+  });
+
+  it('keeps a wrongly typed meta content through merging so it can be reported', () => {
+    const merged = mergeLayers([{ meta: [{ name: 'x', content: 5 as never }] }]);
+    expect(merged.meta).toEqual([{ name: 'x', content: 5 }]);
+  });
 });
+
