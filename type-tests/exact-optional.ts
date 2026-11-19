@@ -1,9 +1,10 @@
 // Compiled with exactOptionalPropertyTypes (tsconfig.exact.json): an explicit
 // `undefined` must be accepted wherever a field is optional ("no opinion").
-import { injectSeo, provideSeo, type SeoConfig, type SeoSiteConfig } from '../src/public-api';
+import { article, injectSeo, organization, provideSeo, type SeoConfig, type SeoSiteConfig } from '../src/public-api';
 
 declare const post: { image?: string; alt?: string; excerpt?: string; tags?: string[] };
 declare const env: { baseUrl?: string };
+declare const cms: { id?: string; type?: string };
 
 export const config: SeoConfig = {
   title: undefined,
@@ -21,3 +22,5 @@ export function setup(): void {
   provideSeo({ baseUrl: env.baseUrl });
   injectSeo(() => ({ description: post.excerpt }), { priority: undefined, key: undefined });
 }
+
+export const nodes = [organization({ '@id': cms.id, name: 'Acme' }), article({ '@type': cms.type, '@id': undefined, headline: 'H' })];

@@ -719,5 +719,51 @@ describe('resolveHead', () => {
       expect(onError, label).toHaveBeenCalledTimes(1);
     }
   });
-});
 
+  it('keeps links whose href or key extends another with a fragment', () => {
+    const head = resolveHead(
+      mergeLayers([
+        {
+          links: [
+            { rel: 'preload', href: '/sprite.svg#icons', as: 'image' },
+            { rel: 'preload', href: '/sprite.svg', as: 'image' },
+            { rel: 'preconnect', href: 'https://eu.cdn.test', key: 'cdn#eu' },
+            { rel: 'preconnect', href: 'https://cdn.test', key: 'cdn' },
+          ],
+        },
+      ]),
+      site,
+      { path: '/', origin: null },
+    );
+    const hrefs = head.tags.filter((t) => t.tag === 'link').map((t) => t.attrs['href']);
+    expect(hrefs).toContain('https://x.test/sprite.svg#icons');
+    expect(hrefs).toContain('https://x.test/sprite.svg');
+    expect(hrefs).toContain('https://eu.cdn.test/');
+    expect(hrefs).toContain('https://cdn.test/');
+    expect(new Set(head.tags.map((t) => t.key)).size).toBe(head.tags.length);
+  });
+
+  it('reports top-level fields and list items of the wrong shape', () => {
+    const cases: [string, SeoConfig][] = [
+      ['openGraph', { openGraph: 'Title' as never }],
+      ['twitter', { twitter: '@acct' as never }],
+      ['http', { http: 404 as never }],
+      ['http headers', { http: { headers: 'x-robots-tag: noindex' as never } }],
+      ['bots', { bots: 'noindex' as never }],
+      ['alternate without hreflang', { alternates: [{ href: '/en' } as never] }],
+    ];
+    for (const [label, config] of cases) {
+      const onError = vi.fn();
+      resolveHead(mergeLayers([config], onError), site, { path: '/', origin: null, onError });
+      expect(onError, label).toHaveBeenCalledTimes(1);
+    }
+    for (const [label, config] of [
+      ['jsonLd string item', { jsonLd: ['{"@type":"Thing"}'] }],
+      ['alternates string', { alternates: 'en' }],
+    ] as unknown as [string, SeoConfig][]) {
+      const onError = vi.fn();
+      resolveHead(mergeLayers([config], onError), site, { path: '/', origin: null, onError });
+      expect(onError, label).toHaveBeenCalledTimes(1);
+    }
+  });
+});

@@ -46,18 +46,42 @@ type Bag = Record<string, unknown>;
 
 class TagList {
   readonly tags: HeadTag[] = [];
-  private readonly counts = new Map<string, number>();
+  private counts = new Map<string, number>();
+  /** The identity (base key) each emitted key belongs to; keys are never parsed. */
+  private groupOf = new Map<string, string>();
+  private overridden = new Set<string>();
+  /** Keys of tags that came from extra `meta`/`links` rather than derivation. */
+  extra = new Set<string>();
+  /** Base keys whose derived tags an extra tag replaced. */
+  replaced = new Set<string>();
 
-  /** Appends a tag and returns its key. */
-  add(baseKey: string, tag: HeadTag['tag'], attrs: Record<string, string>, text?: string): string {
-    const seen = this.counts.get(baseKey) ?? 0;
-    this.counts.set(baseKey, seen + 1);
-    const key = seen === 0 ? baseKey : `${baseKey}#${seen}`;
-    this.tags.push(text === undefined ? { key, tag, attrs } : { key, tag, attrs, text });
+  /**
+   * A key for the next tag with this identity, unique among all tags. Repeats
+   * get `#n`; a base key that itself contains `#` (an href with a fragment)
+   * can never collide, because taken keys are skipped.
+   */
+  private nextKey(baseKey: string): string {
+    let n = this.counts.get(baseKey) ?? 0;
+    let key = n === 0 ? baseKey : `${baseKey}#${n}`;
+    while (this.groupOf.has(key)) {
+      n++;
+      key = `${baseKey}#${n}`;
+    }
+    this.counts.set(baseKey, n + 1);
+    this.groupOf.set(key, baseKey);
     return key;
   }
 
-  private overridden = new Set<string>();
+  private inGroup(key: string, baseKey: string): boolean {
+    return this.groupOf.get(key) === baseKey;
+  }
+
+  /** Appends a tag and returns its key. */
+  add(baseKey: string, tag: HeadTag['tag'], attrs: Record<string, string>, text?: string): string {
+    const key = this.nextKey(baseKey);
+    this.tags.push(text === undefined ? { key, tag, attrs } : { key, tag, attrs, text });
+    return key;
+  }
 
   /** Sets the tag with this key, replacing it in place if it exists. */
   replace(key: string, tag: HeadTag['tag'], attrs: Record<string, string>): void {
@@ -70,22 +94,17 @@ class TagList {
     this.add(key, tag, attrs);
   }
 
-  /** Keys of tags that came from extra `meta`/`links` rather than derivation. */
-  extra = new Set<string>();
-  /** Base keys whose derived tags an extra tag replaced. */
-  replaced = new Set<string>();
-
   checkpoint(): {
-    length: number;
     counts: Map<string, number>;
+    groupOf: Map<string, string>;
     overridden: Set<string>;
     extra: Set<string>;
     replaced: Set<string>;
     attrs: HeadTag[];
   } {
     return {
-      length: this.tags.length,
       counts: new Map(this.counts),
+      groupOf: new Map(this.groupOf),
       overridden: new Set(this.overridden),
       extra: new Set(this.extra),
       replaced: new Set(this.replaced),
@@ -93,11 +112,22 @@ class TagList {
     };
   }
 
+  restore(checkpoint: ReturnType<TagList['checkpoint']>): void {
+    this.tags.length = 0;
+    this.tags.push(...checkpoint.attrs);
+    this.counts = checkpoint.counts;
+    this.groupOf = checkpoint.groupOf;
+    this.overridden = checkpoint.overridden;
+    this.extra = checkpoint.extra;
+    this.replaced = checkpoint.replaced;
+  }
+
   /** Removes the tag with this exact key. */
   remove(key: string): void {
     const at = this.tags.findIndex((item) => item.key === key);
     if (at !== -1) {
       this.tags.splice(at, 1);
+      this.groupOf.delete(key);
     }
   }
 
@@ -105,37 +135,25 @@ class TagList {
     return this.tags.find((item) => item.key === key);
   }
 
-  restore(checkpoint: ReturnType<TagList['checkpoint']>): void {
-    this.tags.length = 0;
-    this.tags.push(...checkpoint.attrs);
-    this.counts.clear();
-    for (const [key, count] of checkpoint.counts) {
-      this.counts.set(key, count);
-    }
-    this.overridden = checkpoint.overridden;
-    this.extra = checkpoint.extra;
-    this.replaced = checkpoint.replaced;
-  }
-
   /**
    * Adds an extra tag. If a derived tag already has this identity, the extra
    * tag replaces it in place instead of producing a duplicate.
    */
   override(baseKey: string, tag: HeadTag['tag'], attrs: Record<string, string>): void {
-    const inGroup = (key: string): boolean => key === baseKey || key.startsWith(`${baseKey}#`);
     if (!this.overridden.has(baseKey)) {
       this.overridden.add(baseKey);
       // The first extra tag replaces every derived repeat with this identity, in place.
-      const first = this.tags.findIndex((item) => inGroup(item.key));
+      const first = this.tags.findIndex((item) => this.inGroup(item.key, baseKey));
       if (first !== -1) {
         for (let i = this.tags.length - 1; i > first; i--) {
-          if (inGroup(this.tags[i].key)) {
+          if (this.inGroup(this.tags[i].key, baseKey)) {
+            this.groupOf.delete(this.tags[i].key);
             this.tags.splice(i, 1);
           }
         }
-        this.tags[first] = { key: baseKey, tag, attrs };
-        this.counts.set(baseKey, 1);
-        this.extra.add(baseKey);
+        const key = this.tags[first].key;
+        this.tags[first] = { key, tag, attrs };
+        this.extra.add(key);
         this.replaced.add(baseKey);
         return;
       }
@@ -145,13 +163,11 @@ class TagList {
     // Further extra tags with this identity are all kept, right after the group.
     let last = -1;
     this.tags.forEach((item, index) => {
-      if (inGroup(item.key)) {
+      if (this.inGroup(item.key, baseKey)) {
         last = index;
       }
     });
-    const seen = this.counts.get(baseKey) ?? 0;
-    this.counts.set(baseKey, seen + 1);
-    const entry: HeadTag = { key: `${baseKey}#${seen}`, tag, attrs };
+    const entry: HeadTag = { key: this.nextKey(baseKey), tag, attrs };
     this.extra.add(entry.key);
     if (last === -1) {
       this.tags.push(entry);
@@ -398,7 +414,14 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   // Server response first, so a broken head section never loses a status.
   const http = guarded<ResolvedHead['http']>(() => {
     const headers: Record<string, string> = {};
-    const source = merged.http?.headers;
+    const httpValue: unknown = merged.http;
+    if (httpValue !== undefined && httpValue !== null && !isObject(httpValue)) {
+      onError(new Error('ngx-seo: ignored http: expected { status, headers }'));
+    }
+    const source = isObject(httpValue) ? (httpValue as { headers?: unknown }).headers : undefined;
+    if (source !== undefined && source !== null && !isObject(source)) {
+      onError(new Error('ngx-seo: ignored http.headers: expected an object of header names'));
+    }
     if (isObject(source)) {
       for (const [name, v] of Object.entries(source)) {
         if (typeof v === 'string') {
@@ -409,7 +432,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       }
     }
     const out: ResolvedHead['http'] = { headers };
-    const status: unknown = merged.http?.status;
+    const status: unknown = isObject(httpValue) ? (httpValue as { status?: unknown }).status : undefined;
     if (typeof status === 'number') {
       out.status = status;
     } else if (status !== null && status !== undefined) {
@@ -529,6 +552,9 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     for (const alternate of objects<SeoAlternate>(merged.alternates)) {
       const hreflang = textField(alternate.hreflang, 'alternates[].hreflang');
       if (hreflang === undefined) {
+        if (alternate.hreflang === undefined || alternate.hreflang === null) {
+          onError(new Error('ngx-seo: ignored an alternate without hreflang'));
+        }
         continue;
       }
       const href = url(alternate.href, `alternates[${hreflang}]`);
@@ -539,6 +565,15 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   });
 
   // Open Graph
+  /** An object field; a value of another kind is reported and ignored. */
+  const objectField = (value: unknown, field: string): void => {
+    if (value !== undefined && value !== null && !isObject(value)) {
+      onError(new Error(`ngx-seo: ignored ${field}: expected an object`));
+    }
+  };
+  objectField(merged.openGraph, 'openGraph');
+  objectField(merged.twitter, 'twitter');
+  objectField(merged.bots, 'bots');
   const og: OpenGraphConfig = isObject(merged.openGraph) ? merged.openGraph : {};
   const tw: TwitterConfig = isObject(merged.twitter) ? merged.twitter : {};
   // Read once, so a wrongly typed value is reported once.

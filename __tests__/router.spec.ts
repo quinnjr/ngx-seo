@@ -17,7 +17,17 @@ import {
 } from '@angular/router';
 import { injectSeo } from '../src/lib/inject-seo';
 import { HeadReconciler } from '../src/lib/reconciler';
-import { ApplicationRef, Injectable, NgModule, input, provideEnvironmentInitializer, signal } from '@angular/core';
+import {
+  ApplicationRef,
+  ElementRef,
+  Injectable,
+  NgModule,
+  ViewChild,
+  input,
+  provideEnvironmentInitializer,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { faqPage } from '../src/lib/builders';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { provideSeo } from '../src/lib/provide-seo';
@@ -747,6 +757,22 @@ describe('route lifecycle', () => {
       }
       await leaves([{ path: 'drafts', component: DraftPage }], '/drafts');
     });
+  });
+
+  it('waits for a required view query inside a block without reporting it', async () => {
+    @Component({ selector: 'seo-intro', template: '@if (true) { <p #intro>Intro text</p> }' })
+    class IntroPage {
+      // JIT cannot see signal queries without metadata; AOT builds do not need this.
+      @ViewChild('intro', { isSignal: true } as never)
+      readonly intro = viewChild.required<ElementRef<HTMLElement>>('intro');
+      readonly seo = injectSeo(() => ({ description: this.intro().nativeElement.textContent ?? '' }));
+    }
+    const { go, errors } = await setup([{ path: 'intro', component: IntroPage }]);
+    await go('/intro');
+    await TestBed.inject(ApplicationRef).whenStable();
+    TestBed.tick();
+    expect(errors).not.toHaveBeenCalled();
+    expect(meta('description')).toBe('Intro text');
   });
 });
 

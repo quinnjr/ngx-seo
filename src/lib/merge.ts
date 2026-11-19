@@ -144,7 +144,12 @@ function cloneValue(value: unknown, ancestors: Set<object> = new Set()): unknown
   return value;
 }
 
-function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string): unknown[] {
+function mergeKeyedList(
+  existing: unknown[],
+  incoming: unknown[],
+  path: string,
+  onError: (error: unknown) => void,
+): unknown[] {
   const keyOf = KEYED_LISTS[path] as KeyFn;
   const higherFirst = HIGHER_FIRST.has(path);
   const result = [...existing];
@@ -208,6 +213,9 @@ function mergeKeyedList(existing: unknown[], incoming: unknown[], path: string):
       continue;
     }
     if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      if (item !== null && item !== undefined) {
+        onError(new Error(`ngx-seo: ignored an item of ${path}: expected an object`));
+      }
       continue;
     }
     // Class instances (e.g. from a schema library) are copied as plain objects.
@@ -330,7 +338,7 @@ function mergeFields(
         continue;
       }
       const existing = Array.isArray(target[key]) ? (target[key] as unknown[]) : [];
-      target[key] = mergeKeyedList(existing, list, here);
+      target[key] = mergeKeyedList(existing, list, here, onError);
       continue;
     }
     // A single media object or URL counts as a one-item list, replaced whole.

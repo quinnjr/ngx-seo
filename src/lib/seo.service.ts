@@ -143,13 +143,14 @@ function primaryUrl(router: Router): string {
 /** The value of a contribution that is waiting for a required input. */
 const NOT_READY: SeoConfig = Object.freeze({});
 
-/** True for Angular's "required input has no value yet" error (NG0950). */
+/** True for Angular's "required input or query has no value yet" errors. */
 function isInputNotReady(error: unknown): boolean {
   if (error === null || typeof error !== 'object') {
     return false;
   }
   const { code, message } = error as { code?: unknown | undefined; message?: unknown | undefined };
-  return code === -950 || (typeof message === 'string' && message.includes('NG0950'));
+  // NG0950: a required input; NG0951: a required query result (e.g. viewChild.required inside @if).
+  return code === -950 || code === -951 || (typeof message === 'string' && /NG095[01]/.test(message));
 }
 
 /** The missing-baseUrl warning is printed once per server process, not per request. */

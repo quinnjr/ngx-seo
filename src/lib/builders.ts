@@ -12,7 +12,7 @@ export type Extra = { [key: string]: unknown };
 /** A node reference such as `{ '@id': '/#org' }`, or any node. */
 export type NodeRef = { '@id': string } | JsonLdNode;
 
-type Typed<T> = T & Extra & { '@type'?: string | readonly string[]; '@id'?: string };
+type Typed<T> = T & Extra & { '@type'?: string | readonly string[] | undefined; '@id'?: string | undefined };
 
 /** `Array.isArray` that also narrows readonly arrays. */
 function isList<T>(value: unknown): value is readonly T[] {
