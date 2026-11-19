@@ -641,6 +641,83 @@ describe('route lifecycle', () => {
       expect(meta('robots')).toBeNull();
     });
 
+    describe('under a section with its own injector', () => {
+      @NgModule({ providers: [DraftSeo] })
+      class SectionDraftModule {}
+      @Component({ selector: 'seo-section-draft', imports: [SectionDraftModule], template: '' })
+      class SectionDraftPage {
+        readonly service = inject(DraftSeo);
+      }
+      @Injectable()
+      class SectionToken {}
+
+      async function visit(routes: Routes, urls: string[]): Promise<(string | null)[]> {
+        const { go } = await setup([...routes, { path: 'home', component: Page }]);
+        const seen: (string | null)[] = [];
+        for (const url of urls) {
+          await go(url);
+          seen.push(meta('robots'));
+        }
+        return seen;
+      }
+
+      it('scopes a page module service to that page within a section with providers', async () => {
+        const seen = await visit(
+          [
+            {
+              path: 'admin',
+              providers: [SectionToken],
+              children: [
+                { path: 'drafts', component: SectionDraftPage },
+                { path: 'users', component: Page },
+              ],
+            },
+          ],
+          ['/admin/drafts', '/admin/users', '/home'],
+        );
+        expect(seen).toEqual(['noindex', null, null]);
+      });
+
+      it('scopes a page module service to that page within a lazy NgModule area', async () => {
+        @NgModule({
+          imports: [
+            RouterModule.forChild([
+              { path: 'drafts', component: SectionDraftPage },
+              { path: 'users', component: Page },
+            ]),
+          ],
+        })
+        class FeatureModule {}
+        const seen = await visit([{ path: 'feat', loadChildren: () => Promise.resolve(FeatureModule) }], ['/feat/drafts', '/feat/users', '/home']);
+        expect(seen).toEqual(['noindex', null, null]);
+      });
+
+      it('scopes a dynamic widget module service to its page within a section with providers', async () => {
+        @Component({ selector: 'seo-section-widget', imports: [SectionDraftModule], template: '' })
+        class SectionWidget {
+          readonly service = inject(DraftSeo);
+        }
+        @Component({ selector: 'seo-section-dyn', imports: [NgComponentOutlet], template: '<ng-container *ngComponentOutlet="widget" />' })
+        class SectionDynPage {
+          readonly widget = SectionWidget;
+        }
+        const seen = await visit(
+          [
+            {
+              path: 'admin',
+              providers: [SectionToken],
+              children: [
+                { path: 'a', component: SectionDynPage },
+                { path: 'b', component: Page },
+              ],
+            },
+          ],
+          ['/admin/a', '/admin/b'],
+        );
+        expect(seen).toEqual(['noindex', null]);
+      });
+    });
+
     it('follows a standalone page that imports the service module, on every visit and route', async () => {
       @NgModule({ providers: [DraftSeo] })
       class SharedModule {}

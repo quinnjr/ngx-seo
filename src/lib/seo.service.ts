@@ -677,20 +677,19 @@ export class Seo {
       return attached.has(item.route);
     }
     if (item.injector !== null && routeInjectors !== null) {
-      // Walk up from the service's injector to the first injector a route owns.
-      let current: unknown = item.injector;
-      while (current !== null && current !== undefined && current !== this.rootInjector) {
-        const owner = routeInjectors.get(current);
-        if (owner !== undefined) {
-          return attached.has(owner);
-        }
-        current = (current as { parent?: unknown }).parent;
+      // The service's own injector belongs to a route: a route's providers or a
+      // lazy route's injector (even if it was still being built when the
+      // contribution was made).
+      const direct = routeInjectors.get(item.injector);
+      if (direct !== undefined) {
+        return attached.has(direct);
       }
-      // No route owns it: it comes from a module a standalone component imports.
-      // If a routed component owns it, it applies while that component is shown
-      // (a layout across its child pages, a page on every visit and route).
-      // A component outside the router outlet makes it app-wide.
-      const owner = this.ownerOutlet(item.injector);
+      // Otherwise it comes from a module a standalone component imports. If a
+      // routed component owns it, it applies while that component is shown (a
+      // layout across its child pages, a page on every visit and route). This
+      // is checked before any enclosing section's injector, which stays
+      // attached on every sibling page.
+      const owner = this.ownerOutlet(item.injector, routeInjectors);
       if (owner !== null) {
         this.routedOwners.add(item);
         // Named outlets never contribute.
@@ -701,9 +700,21 @@ export class Seo {
       }
       // No shown routed component owns it (a widget rendered dynamically or
       // deferred inside a page, or a component outside the outlet). Scope it
-      // to the page that was active when it was made; only one made before any
-      // page was routed (a shell component) applies app-wide.
-      return item.creationRoute === null || attached.has(item.creationRoute);
+      // to the page that was active when it was made.
+      if (item.creationRoute !== null) {
+        return attached.has(item.creationRoute);
+      }
+      // Made before any page was routed: it follows the nearest enclosing
+      // route injector, or applies app-wide (a shell component).
+      let current: unknown = (item.injector as { parent?: unknown }).parent;
+      while (current !== null && current !== undefined && current !== this.rootInjector) {
+        const enclosing = routeInjectors.get(current);
+        if (enclosing !== undefined) {
+          return attached.has(enclosing);
+        }
+        current = (current as { parent?: unknown }).parent;
+      }
+      return true;
     }
     return true;
   }
@@ -733,10 +744,12 @@ export class Seo {
    * injector: the component's environment injector is the injector or one of
    * its ancestors.
    */
-  private ownerOutlet(injector: EnvironmentInjector): 'primary' | 'named' | null {
+  private ownerOutlet(injector: EnvironmentInjector, routeInjectors: ReadonlyMap<unknown, Route>): 'primary' | 'named' | null {
+    // Only the component's own injectors count, not an enclosing route's: a
+    // plain page under a section shares the section's injector.
     const ancestors = new Set<unknown>();
     let current: unknown = injector;
-    while (current !== null && current !== undefined && current !== this.rootInjector) {
+    while (current !== null && current !== undefined && current !== this.rootInjector && !routeInjectors.has(current)) {
       ancestors.add(current);
       current = (current as { parent?: unknown }).parent;
     }
@@ -799,17 +812,18 @@ export class Seo {
     return search(this.router.config, '');
   }
 
-  /**
-   * Browser only: which server copy a route-service contribution continues.
-   * Services may be created in a different order than on the server, so a
-   * copy is matched only when that is unambiguous: the route has a single
-   * copy, or exactly one unclaimed copy has the same config.
-   */
+  /** Browser only: ids of the unkeyed server copies recorded for a route. */
   private recordedRouteCopies(routeKey: string): string[] {
     const prefix = `r:${routeKey}#`;
     return [...this.serverOrders.keys()].filter((id) => id.startsWith(prefix) && !id.startsWith(`${prefix}k:`));
   }
 
+  /**
+   * Browser only: which server copy a route-service contribution continues.
+   * Services may be created in a different order than on the server, so a
+   * copy is matched only when that is unambiguous: exactly one unclaimed copy
+   * has the same config. A copy is never continued twice.
+   */
   private claimRouteCopy(routeKey: string, config: SeoConfig | (() => SeoConfig)): string | null {
     // A copy is continued at most once, and only by a service whose config matches it:
     // a service the server never created must not take another service's copy.
