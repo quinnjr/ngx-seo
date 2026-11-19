@@ -598,5 +598,23 @@ describe('incremental hydration', () => {
     expect(html).not.toContain('SECRET123');
     expect(html).not.toContain('server-only');
   });
-});
 
+  it('continues a route service copy whose config includes server-only http', async () => {
+    @Injectable()
+    class NotFoundSeo {
+      readonly seo = injectSeo({ jsonLd: [{ '@type': 'Thing', name: 'svc-node' }], http: { status: 404 } });
+    }
+    @Component({ selector: 'nf-page', template: '<p>nf</p>' })
+    class NfPage {
+      readonly svc = inject(NotFoundSeo);
+    }
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(App, [{ path: 'nf', component: NfPage, providers: [NotFoundSeo] }], '/nf', {
+      baseUrl: 'https://x.test',
+    } as typeof site);
+    expect((document.head.querySelector('script[type="application/ld+json"]')?.textContent ?? '').match(/svc-node/g)).toHaveLength(1);
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
+});

@@ -593,5 +593,9 @@ describe('mergeLayers', () => {
     expect(merged.openGraph?.images).toEqual([{ url: '/a.png' }]);
     expect(onError).not.toHaveBeenCalled();
   });
-});
 
+  it('does not let an empty article object release a lower og:type extra', () => {
+    const merged = mergeLayers([{ meta: [{ property: 'og:type', content: 'product' }] }, { openGraph: { article: { publishedTime: undefined } } }]);
+    expect(merged.meta).toEqual([{ property: 'og:type', content: 'product' }]);
+  });
+});

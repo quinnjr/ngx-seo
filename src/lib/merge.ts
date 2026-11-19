@@ -521,7 +521,13 @@ function releaseClaimedExtras(result: Bag, rawLayer: Bag): void {
     }
   }
   const openGraph = layer['openGraph'];
-  if (isPlainObject(openGraph) && ['article', 'profile', 'book'].some((object) => isPlainObject(openGraph[object]))) {
+  if (
+    isPlainObject(openGraph) &&
+    ['article', 'profile', 'book'].some((object) => {
+      const nested = openGraph[object];
+      return isPlainObject(nested) && hasSetEntry(nested);
+    })
+  ) {
     // og:type is derived from article, profile or book data.
     claims.push('og:type');
   }
