@@ -65,4 +65,13 @@ describe('canonicalFor', () => {
     expect(canonicalFor('/list?sort=x&page=2', base, policy)).toBe('https://x.test/list?page=2&sort=x');
     expect(canonicalFor('/list?page=2&sort=x', base, policy)).toBe('https://x.test/list?page=2&sort=x');
   });
+
+  it('keeps kept query parameters exactly as the router wrote them', () => {
+    expect(
+      canonicalFor('/search?q=red%20shoes&sort=price,asc&at=a@b:c&utm=x', base, {
+        trailingSlash: 'preserve',
+        keepQueryParams: ['q', 'sort', 'at'],
+      }),
+    ).toBe('https://x.test/search?q=red%20shoes&sort=price,asc&at=a@b:c');
+  });
 });

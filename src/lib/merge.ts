@@ -454,7 +454,38 @@ function isSet(value: unknown): boolean {
  * layers that produce the same tag give way to it, so the higher layer wins
  * whichever way each layer expressed the tag.
  */
-function releaseClaimedExtras(result: Bag, layer: Bag): void {
+/**
+ * The layer as merging reads it: class instances seen as plain objects, a few
+ * levels deep (enough for every field the claims inspect), cycle-safe.
+ */
+function plainView(value: unknown, depth = 0, seen: Set<object> = new Set()): unknown {
+  if (depth > 4 || value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (seen.has(value)) {
+    return undefined;
+  }
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => plainView(item, depth + 1, seen));
+    }
+    const plain = asPlain(value);
+    if (!isPlainObject(plain)) {
+      return plain;
+    }
+    const out: Bag = {};
+    for (const [key, inner] of safeEntries(plain)) {
+      out[key] = plainView(inner, depth + 1, seen);
+    }
+    return out;
+  } finally {
+    seen.delete(value);
+  }
+}
+
+function releaseClaimedExtras(result: Bag, rawLayer: Bag): void {
+  const layer = plainView(rawLayer) as Bag;
   const claims: string[] = [];
   for (const [field, metas] of Object.entries(FIELD_META)) {
     const value = layer[field];

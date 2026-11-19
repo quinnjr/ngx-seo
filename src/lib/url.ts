@@ -62,14 +62,25 @@ export function canonicalFor(
     pathname = pathname.replace(/\/+$/, '') || '/';
   }
 
-  // Kept parameters follow keepQueryParams order, so one page has one canonical.
-  const kept = new URLSearchParams();
-  for (const name of policy.keepQueryParams) {
-    for (const value of url.searchParams.getAll(name)) {
-      kept.append(name, value);
-    }
-  }
-  const query = kept.toString();
+  // Kept parameters follow keepQueryParams order, so one page has one canonical,
+  // and keep the router's own encoding (re-serialising would turn %20 into +).
+  const pairs = url.search
+    .slice(1)
+    .split('&')
+    .filter((pair) => pair !== '')
+    .map((pair) => {
+      const raw = pair.split('=')[0];
+      let name = raw;
+      try {
+        name = decodeURIComponent(raw.replace(/\+/g, ' '));
+      } catch {
+        // Keep the raw name if it is not valid percent-encoding.
+      }
+      return { name, pair };
+    });
+  const query = policy.keepQueryParams
+    .flatMap((keep) => pairs.filter((entry) => entry.name === keep).map((entry) => entry.pair))
+    .join('&');
 
   return `${url.origin}${pathname}${query === '' ? '' : `?${query}`}`;
 }

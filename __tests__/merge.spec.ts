@@ -535,4 +535,33 @@ describe('mergeLayers', () => {
     });
     expect(mergeLayers([{ bots: { Googlebot: 'noindex' } }, { bots: { googlebot: null } }]).bots).toEqual({});
   });
+
+  it('lets class-instance fields release lower extra tags like plain objects do', () => {
+    class Og {
+      title = 'Page';
+    }
+    class Tw {
+      title = 'Page';
+    }
+    class Alt {
+      hreflang = 'fr';
+      href = '/fr-page';
+    }
+    class BlankImage {
+      url = '  ';
+    }
+    const merged = mergeLayers([
+      {
+        meta: [
+          { property: 'og:title', content: 'Site-wide' },
+          { name: 'twitter:title', content: 'Site-wide' },
+          { property: 'og:image', content: '/site.png' },
+        ],
+        links: [{ rel: 'alternate', hreflang: 'fr', href: '/fr' }],
+      },
+      { openGraph: new Og() as never, twitter: new Tw() as never, alternates: [new Alt() as never], image: new BlankImage() as never },
+    ]);
+    expect(merged.meta).toEqual([{ property: 'og:image', content: '/site.png' }]);
+    expect(merged.links).toEqual([]);
+  });
 });
