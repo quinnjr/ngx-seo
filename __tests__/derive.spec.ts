@@ -798,5 +798,33 @@ describe('resolveHead', () => {
     expect(value(head, 'meta:name:twitter:image')).toBe('https://x.test/product-photo.png');
     expect(value(head, 'meta:name:twitter:image:alt')).toBeUndefined();
   });
-});
 
+  it('treats whitespace-only URLs as no opinion, never as the site root', () => {
+    const head = resolveHead(
+      mergeLayers([{ canonical: ' ', image: '\n', alternates: [{ hreflang: 'de', href: ' ' }] }]),
+      site,
+      { path: '/blog/post-1', origin: null },
+    );
+    expect(head.canonical).toBe('https://x.test/blog/post-1');
+    expect(value(head, 'meta:property:og:image')).toBeUndefined();
+    expect(value(head, 'link:alternate:de')).toBeUndefined();
+    const direct = resolveHead({ canonical: '  ' }, site, { path: '/p', origin: null });
+    expect(direct.canonical).toBe('https://x.test/p');
+  });
+
+  it('reports wrongly typed robots directives and dates', () => {
+    const cases: [string, SeoConfig][] = [
+      ['index flag', { robots: { index: 'false' as never } }],
+      ['snippet size', { robots: { maxSnippet: '50' as never } }],
+      ['image preview', { robots: { maxImagePreview: 'huge' as never } }],
+      ['unavailable after', { robots: { unavailableAfter: 1700000000000 as never } }],
+      ['published time', { openGraph: { article: { publishedTime: 1700000000000 as never } } }],
+      ['release date', { openGraph: { book: { releaseDate: {} as never } } }],
+    ];
+    for (const [label, config] of cases) {
+      const onError = vi.fn();
+      resolveHead(config, site, { path: '/', origin: null, onError });
+      expect(onError, label).toHaveBeenCalledTimes(1);
+    }
+  });
+});

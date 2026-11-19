@@ -496,5 +496,17 @@ describe('mergeLayers', () => {
     const merged = mergeLayers([{ meta: [{ name: 'x', content: 5 as never }] }]);
     expect(merged.meta).toEqual([{ name: 'x', content: 5 }]);
   });
-});
 
+  it('does not let an empty images list or an undefined bot claim lower extra meta', () => {
+    for (const images of [[], [{ url: '' }], [removeItem('/other.png')]]) {
+      const merged = mergeLayers([{ meta: [{ property: 'og:image', content: '/site.png' }] }, { openGraph: { images: images as never } }]);
+      expect(merged.meta, JSON.stringify(images)).toEqual([{ property: 'og:image', content: '/site.png' }]);
+    }
+    const bots = mergeLayers([{ meta: [{ name: 'googlebot', content: 'noarchive' }] }, { bots: { googlebot: undefined } }]);
+    expect(bots.meta).toEqual([{ name: 'googlebot', content: 'noarchive' }]);
+  });
+
+  it('treats whitespace-only text as no opinion', () => {
+    expect(mergeLayers([{ title: 'T', canonical: '/c' }, { title: '  ', canonical: ' ' }])).toMatchObject({ title: 'T', canonical: '/c' });
+  });
+});

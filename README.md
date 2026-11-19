@@ -228,7 +228,7 @@ Merge rules:
 | Kind | Rule |
 |---|---|
 | Scalars (`title`, `description`, `canonical`, …) | The highest layer that sets the field wins. |
-| `undefined` or `''` | No opinion. |
+| `undefined`, `''` or whitespace-only text | No opinion. A blank URL never resolves to the site root. |
 | `null` | Remove what lower layers set. Works at any depth. |
 | Objects (`openGraph`, `twitter`, `robots`, `bots`, `http`) | Merged field by field. A raw-string `robots` replaces the whole object. |
 | Keyed lists | Items from all layers are combined; items with the same key collapse to the higher layer. Items without a key are all kept. See the key table below. |

@@ -388,6 +388,15 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     return str(value);
   };
 
+  /** A date: a valid Date or text; anything else is reported and ignored. */
+  const dateField = (value: unknown, field: string): string | undefined => {
+    if (value !== undefined && value !== null && !(value instanceof Date) && typeof value !== 'string') {
+      onError(new Error(`ngx-seo: ignored ${field}: expected a Date or text`));
+      return undefined;
+    }
+    return dateText(value);
+  };
+
   /** A list of text items; non-text items are reported and skipped. */
   const textItems = (value: unknown, field: string): string[] =>
     items<unknown>(value).flatMap((item) => {
@@ -411,7 +420,8 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
 
   const url = (value: unknown, field: string): string | null => {
     const text = textField(value, field);
-    if (text === undefined) {
+    // A blank value has no opinion; it must never resolve to the site root.
+    if (text === undefined || text.trim() === '') {
       return null;
     }
     const resolved = absoluteUrl(text, documentBase);
@@ -485,7 +495,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     if (merged.canonical === false) {
       return null;
     }
-    if (typeof merged.canonical === 'string') {
+    if (typeof merged.canonical === 'string' && merged.canonical.trim() !== '') {
       return url(merged.canonical, 'canonical');
     }
     return canonicalFor(env.path, origin, policy);
@@ -532,7 +542,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     if (robotsValue !== undefined && robotsValue !== null && typeof robotsValue !== 'string' && !isObject(robotsValue)) {
       onError(new Error('ngx-seo: ignored robots: expected directives or text'));
     }
-    robots = typeof robotsValue === 'string' || isObject(robotsValue) ? robotsContent(robotsValue as RobotsDirectives | string) : null;
+    robots = typeof robotsValue === 'string' || isObject(robotsValue) ? robotsContent(robotsValue as RobotsDirectives | string, onError) : null;
     list.name('robots', robots);
   });
   section(() => {
@@ -548,7 +558,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
             onError(new Error(`ngx-seo: ignored bots.${bot}: expected directives or text`));
           }
         } else {
-          list.name(bot, robotsContent(directives));
+          list.name(bot, robotsContent(directives, onError));
         }
       }
     }
@@ -671,9 +681,9 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       return;
     }
     const a = og.article;
-    list.property('article:published_time', dateText(a.publishedTime));
-    list.property('article:modified_time', dateText(a.modifiedTime));
-    list.property('article:expiration_time', dateText(a.expirationTime));
+    list.property('article:published_time', dateField(a.publishedTime, 'openGraph.article.publishedTime'));
+    list.property('article:modified_time', dateField(a.modifiedTime, 'openGraph.article.modifiedTime'));
+    list.property('article:expiration_time', dateField(a.expirationTime, 'openGraph.article.expirationTime'));
     for (const author of textItems(a.authors, 'openGraph.article.authors')) {
       list.property('article:author', author);
     }
@@ -699,7 +709,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       list.property('book:author', author);
     }
     list.property('book:isbn', textField(og.book.isbn, 'openGraph.book.isbn'));
-    list.property('book:release_date', dateText(og.book.releaseDate));
+    list.property('book:release_date', dateField(og.book.releaseDate, 'openGraph.book.releaseDate'));
     for (const tag of textItems(og.book.tags, 'openGraph.book.tags')) {
       list.property('book:tag', tag);
     }

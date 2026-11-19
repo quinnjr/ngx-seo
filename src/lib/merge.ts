@@ -222,7 +222,8 @@ function mergeKeyedList(
     const plain: Bag = isPlainObject(item) ? item : { ...(item as Bag) };
     // An item without its value ('' or missing content/href, e.g. an empty CMS field) has no opinion.
     // A value of the wrong type is kept, so derivation can report it.
-    const missing = (field: string): boolean => plain[field] === undefined || plain[field] === null || plain[field] === '';
+    const missing = (field: string): boolean =>
+      plain[field] === undefined || plain[field] === null || (typeof plain[field] === 'string' && (plain[field] as string).trim() === '');
     if ((path === 'meta' && missing('content')) || ((path === 'alternates' || path === 'links') && missing('href'))) {
       continue;
     }
@@ -331,7 +332,8 @@ function mergeFields(
     const here = path === '' ? key : `${path}.${key}`;
     const value = asPlain(rawValue);
 
-    if (value === undefined || value === '') {
+    // undefined, '' and whitespace-only text have no opinion.
+    if (value === undefined || (typeof value === 'string' && value.trim() === '')) {
       continue;
     }
     // An image without a URL (e.g. an empty CMS field) has no opinion.
@@ -433,6 +435,14 @@ const TWITTER_META: Record<string, string[]> = {
   imageAlt: ['twitter:image:alt'],
 };
 
+/** Whether a media field holds a real item: a URL, or an object with a URL (not just removals or blanks). */
+function hasMediaItem(value: unknown): boolean {
+  const list = Array.isArray(value) ? value : [value];
+  return list.some((item) =>
+    typeof item === 'string' ? item.trim() !== '' : isPlainObject(item) && !isRemoval(item) && typeof item['url'] === 'string' && item['url'].trim() !== '',
+  );
+}
+
 function isSet(value: unknown): boolean {
   return value !== undefined && value !== '';
 }
@@ -456,7 +466,8 @@ function releaseClaimedExtras(result: Bag, layer: Bag): void {
     const value = layer[group];
     if (isPlainObject(value)) {
       for (const [field, metas] of Object.entries(table)) {
-        if (isSet(value[field])) {
+        const media = group === 'openGraph' && (field === 'images' || field === 'videos' || field === 'audio');
+        if (isSet(value[field]) && (!media || hasMediaItem(value[field]))) {
           claims.push(...metas);
         }
       }
@@ -480,7 +491,12 @@ function releaseClaimedExtras(result: Bag, layer: Bag): void {
     }
   }
   if (isPlainObject(layer['bots'])) {
-    claims.push(...Object.keys(layer['bots']).map((bot) => bot.toLowerCase()));
+    // Only crawlers given a real value claim; an undefined entry has no opinion.
+    for (const [bot, directives] of Object.entries(layer['bots'])) {
+      if (isSet(directives) && directives !== null) {
+        claims.push(bot.toLowerCase());
+      }
+    }
   }
   const claimed = (identity: string): boolean =>
     claims.some((claim) => (claim.endsWith('*') ? identity.startsWith(claim.slice(0, -1)) : identity === claim));
