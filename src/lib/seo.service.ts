@@ -53,34 +53,34 @@ import { ResponseWriter } from './response';
 
 export interface ContributeOptions {
   /** Higher wins. Ties resolve by creation order. Default 0. */
-  priority?: number;
+  priority?: number | undefined;
   /** Removes the contribution when this is destroyed. */
-  destroyRef?: DestroyRef;
+  destroyRef?: DestroyRef | undefined;
   /**
    * The route the contribution belongs to: an `ActivatedRoute`, or a `Route`
    * config. It only applies while that route is attached, so a page kept alive
    * by a `RouteReuseStrategy`, or a service from a route's `providers`, stops
    * contributing once you navigate away. `injectSeo` sets this for you.
    */
-  route?: ActivatedRoute | Route | null;
+  route?: ActivatedRoute | Route | null | undefined;
   /**
    * The component host element. It carries the contribution across
    * hydration: until the component hydrates in the browser, the server's copy
    * of its SEO stands in for it. `injectSeo` sets this for you.
    */
-  host?: Element | null;
+  host?: Element | null | undefined;
   /**
    * The environment injector of a service making the contribution. While no
    * `route` is known, the contribution follows the route that injector
    * belongs to, found when it is evaluated. `injectSeo` sets this for you.
    */
-  injector?: EnvironmentInjector | null;
+  injector?: EnvironmentInjector | null | undefined;
   /**
    * A stable identity for a contribution from a route's services, the same
    * on server and browser. Only needed when one route has several such
    * contributions whose configs differ between server and browser.
    */
-  key?: string;
+  key?: string | undefined;
 }
 
 /** Host attribute linking a server-rendered component to its server SEO copy. */
@@ -148,7 +148,7 @@ function isInputNotReady(error: unknown): boolean {
   if (error === null || typeof error !== 'object') {
     return false;
   }
-  const { code, message } = error as { code?: unknown; message?: unknown };
+  const { code, message } = error as { code?: unknown | undefined; message?: unknown | undefined };
   return code === -950 || (typeof message === 'string' && message.includes('NG0950'));
 }
 
@@ -603,7 +603,7 @@ export class Seo {
     return resolveHead(mergeLayers([this.defaultsLayer([], env)]), this.effectiveSite, env);
   }
 
-  private defaultsLayer(layers: SeoConfig[], env: { path: string; origin: string | null; basePath?: string }): SeoConfig {
+  private defaultsLayer(layers: SeoConfig[], env: { path: string; origin: string | null; basePath?: string | undefined }): SeoConfig {
     const defaults = this.site.defaults;
     if (typeof defaults !== 'function') {
       return defaults ?? {};
@@ -693,7 +693,7 @@ export class Seo {
   /** Every injector the router created for a route, mapped to its route config. */
   private routeInjectors(): Map<unknown, Route> {
     const owners = new Map<unknown, Route>();
-    type Internal = Route & { _injector?: unknown; _loadedInjector?: unknown; _loadedRoutes?: Route[] };
+    type Internal = Route & { _injector?: unknown | undefined; _loadedInjector?: unknown | undefined; _loadedRoutes?: Route[] | undefined };
     const visit = (routes: readonly Route[] | undefined): void => {
       for (const route of (routes ?? []) as Internal[]) {
         if (route._injector) {
@@ -722,15 +722,15 @@ export class Seo {
     let current: unknown = injector;
     while (current !== null && current !== undefined && current !== this.rootInjector && !routeInjectors.has(current)) {
       ancestors.add(current);
-      current = (current as { parent?: unknown }).parent;
+      current = (current as { parent?: unknown | undefined }).parent;
     }
-    type Contexts = { contexts?: Map<string, OutletContext> } | null | undefined;
+    type Contexts = { contexts?: Map<string, OutletContext> | undefined } | null | undefined;
     const visit = (contexts: Contexts, primaryChain: boolean): 'primary' | 'named' | null => {
       // ChildrenOutletContexts keeps its contexts in a private map; there is no public list.
       for (const [name, context] of contexts?.contexts ?? []) {
         const onPrimary = primaryChain && name === PRIMARY_OUTLET;
         // `activated` is the outlet's ComponentRef; the outlet exposes no public accessor for it.
-        const activated = (context.outlet as unknown as { activated?: ComponentRef<unknown> | null } | null)?.activated;
+        const activated = (context.outlet as unknown as { activated?: ComponentRef<unknown> | null | undefined } | null)?.activated;
         const environment = activated?.injector.get(EnvironmentInjector, null);
         if (environment !== null && environment !== undefined && ancestors.has(environment)) {
           return onPrimary ? 'primary' : 'named';
@@ -765,7 +765,7 @@ export class Seo {
     if (!config || this.router === null) {
       return null;
     }
-    type Loaded = Route & { _loadedRoutes?: Route[] };
+    type Loaded = Route & { _loadedRoutes?: Route[] | undefined };
     const search = (routes: readonly Route[] | undefined, prefix: string): string | null => {
       for (const [index, candidate] of (routes ?? []).entries()) {
         const here = `${prefix}${index}`;
@@ -824,7 +824,7 @@ export class Seo {
     for (const part of key.split(/(?=[.~])/)) {
       const lazy = part.startsWith('~');
       const index = Number(part.replace(/^[.~]/, ''));
-      const list: readonly Route[] | undefined = lazy ? (found as (Route & { _loadedRoutes?: Route[] }) | null)?._loadedRoutes : found === null ? routes : found.children;
+      const list: readonly Route[] | undefined = lazy ? (found as (Route & { _loadedRoutes?: Route[] | undefined }) | null)?._loadedRoutes : found === null ? routes : found.children;
       found = list?.[index] ?? null;
       if (found === null) {
         return null;

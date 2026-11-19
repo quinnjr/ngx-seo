@@ -146,9 +146,9 @@ export const SEO_RESTORE_ATTR = 'data-seo-restore';
 
 export interface HeadReconcilerOptions {
   /** Record the shell's title and `<html>` attributes in the document (server rendering). */
-  persistOriginals?: boolean;
+  persistOriginals?: boolean | undefined;
   /** Restore the original title when no title is resolved. False when another title owner exists. */
-  restoreTitle?: boolean;
+  restoreTitle?: boolean | undefined;
 }
 
 interface Originals {

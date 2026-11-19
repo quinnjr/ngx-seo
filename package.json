@@ -17,7 +17,7 @@
   "sideEffects": false,
   "scripts": {
     "build": "ng-packagr -p ng-package.json -c tsconfig.lib.json",
-    "test": "tsc -p tsconfig.json --noEmit && vitest run",
+    "test": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.exact.json --noEmit && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "release": "pnpm build && pnpm publish dist"
   },

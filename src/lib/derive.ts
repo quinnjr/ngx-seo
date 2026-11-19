@@ -25,9 +25,9 @@ export interface ResolveEnv {
   /** Request or window origin, used when the site has no `baseUrl`. */
   origin: string | null;
   /** Path the app is served under (e.g. `/blog/`); document-relative URLs resolve against it. */
-  basePath?: string;
+  basePath?: string | undefined;
   /** Receives JSON-LD serialisation errors. */
-  onError?: (error: unknown) => void;
+  onError?: ((error: unknown) => void) | undefined;
 }
 
 /** JSON-LD properties whose root-relative string values are made absolute. */
@@ -200,7 +200,7 @@ function resolveJsonLd(value: unknown, pageUrl: string | null, origin: string | 
     return value;
   }
   // Dates, URLs and anything else that serialises itself are passed through.
-  if (!Array.isArray(value) && typeof (value as { toJSON?: unknown }).toJSON === 'function') {
+  if (!Array.isArray(value) && typeof (value as { toJSON?: unknown | undefined }).toJSON === 'function') {
     return value;
   }
   if (ancestors.has(value)) {
@@ -510,7 +510,11 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
           onError(new Error(`ngx-seo: ignored bots.${bot}: that name belongs to another tag`));
           continue;
         }
-        if (typeof directives === 'string' || isObject(directives)) {
+        if (typeof directives !== 'string' && !isObject(directives)) {
+          if (directives !== null && directives !== undefined) {
+            onError(new Error(`ngx-seo: ignored bots.${bot}: expected directives or text`));
+          }
+        } else {
           list.name(bot, robotsContent(directives));
         }
       }
@@ -523,7 +527,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       list.add('link:canonical', 'link', { rel: 'canonical', href: canonical });
     }
     for (const alternate of objects<SeoAlternate>(merged.alternates)) {
-      const hreflang = str(alternate.hreflang);
+      const hreflang = textField(alternate.hreflang, 'alternates[].hreflang');
       if (hreflang === undefined) {
         continue;
       }
@@ -569,6 +573,9 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   section(() => {
     const shorthand: SeoImage | null =
       typeof merged.image === 'string' ? { url: merged.image } : isObject(merged.image) ? (merged.image as SeoImage) : null;
+    if (shorthand === null && merged.image !== undefined && merged.image !== null) {
+      onError(new Error('ngx-seo: ignored image: expected a URL or an image object'));
+    }
     const sources: [SeoImage, string][] = [];
     if (shorthand && str(shorthand.url)) {
       sources.push([shorthand, 'image']);
@@ -605,7 +612,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
           return;
         }
         list.property(prop, src);
-        list.property(`${prop}:type`, str(item.type));
+        list.property(`${prop}:type`, textField(item.type, `${field}[${index}].type`));
         list.property(`${prop}:width`, numberField(item.width, `${field}[${index}].width`));
         list.property(`${prop}:height`, numberField(item.height, `${field}[${index}].height`));
       });
@@ -634,10 +641,10 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     if (!isObject(og.profile)) {
       return;
     }
-    list.property('profile:first_name', str(og.profile.firstName));
-    list.property('profile:last_name', str(og.profile.lastName));
-    list.property('profile:username', str(og.profile.username));
-    list.property('profile:gender', str(og.profile.gender));
+    list.property('profile:first_name', textField(og.profile.firstName, 'openGraph.profile.firstName'));
+    list.property('profile:last_name', textField(og.profile.lastName, 'openGraph.profile.lastName'));
+    list.property('profile:username', textField(og.profile.username, 'openGraph.profile.username'));
+    list.property('profile:gender', textField(og.profile.gender, 'openGraph.profile.gender'));
   });
   section(() => {
     if (!isObject(og.book)) {
@@ -646,7 +653,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     for (const author of textItems(og.book.authors, 'openGraph.book.authors')) {
       list.property('book:author', author);
     }
-    list.property('book:isbn', str(og.book.isbn));
+    list.property('book:isbn', textField(og.book.isbn, 'openGraph.book.isbn'));
     list.property('book:release_date', dateText(og.book.releaseDate));
     for (const tag of textItems(og.book.tags, 'openGraph.book.tags')) {
       list.property('book:tag', tag);
@@ -670,7 +677,11 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   section(() => {
     objects<SeoMetaTag>(merged.meta).forEach((meta, index) => {
       let content = textField(meta.content, `meta[${index}].content`);
-      const identity = (str(meta.name) ?? str(meta.property))?.toLowerCase();
+      const name = textField(meta.name, `meta[${index}].name`);
+      const property = textField(meta.property, `meta[${index}].property`);
+      const httpEquiv = textField(meta.httpEquiv, `meta[${index}].httpEquiv`);
+      const media = textField(meta.media, `meta[${index}].media`);
+      const identity = (name ?? property)?.toLowerCase();
       if (content === undefined) {
         return;
       }
@@ -679,7 +690,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
         droppedUrls.push(`meta[${index}]`);
         return;
       }
-      if (str(meta.httpEquiv)?.toLowerCase() === 'refresh') {
+      if (httpEquiv?.toLowerCase() === 'refresh') {
         const checked = refreshContent(content, (target) => url(target, `meta[${index}]`));
         if (checked === null) {
           return;
@@ -693,10 +704,6 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
         }
         content = checked;
       }
-      const name = str(meta.name);
-      const property = str(meta.property);
-      const httpEquiv = str(meta.httpEquiv);
-      const media = str(meta.media);
       const suffix = media === undefined ? '' : `|${media}`;
       const withMedia = (attrs: Record<string, string>): Record<string, string> =>
         media === undefined ? attrs : { ...attrs, media };
@@ -747,7 +754,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
   // Extra links
   section(() => {
     for (const link of objects<SeoLinkTag>(merged.links)) {
-      const rel = str(link.rel)?.toLowerCase();
+      const rel = textField(link.rel, 'links[].rel')?.toLowerCase();
       if (rel === undefined) {
         continue;
       }
@@ -757,7 +764,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
       }
       const attrs: Record<string, string> = { rel, href };
       for (const attr of ['hreflang', 'type', 'media', 'sizes', 'title', 'as', 'fetchpriority', 'referrerpolicy', 'color'] as const) {
-        const v = str(link[attr]);
+        const v = textField(link[attr], `links[].${attr}`);
         if (v) {
           attrs[attr] = v;
         }

@@ -12,16 +12,16 @@ import type { SeoConfig, SeoHandle } from './types';
 
 export interface InjectSeoOptions {
   /** Higher wins. Ties resolve by creation order. Default 0. */
-  priority?: number;
+  priority?: number | undefined;
   /**
    * A stable identity for a contribution from a route's service, the same on
    * server and browser. Only needed for incremental hydration when one route
    * has several service contributions whose configs differ between the two.
    */
-  key?: string;
+  key?: string | undefined;
 }
 
-type InternalRoute = Route & { _injector?: unknown; _loadedInjector?: unknown; _loadedRoutes?: Route[] };
+type InternalRoute = Route & { _injector?: unknown | undefined; _loadedInjector?: unknown | undefined; _loadedRoutes?: Route[] | undefined };
 
 /**
  * The route config whose injector is `injector`: a route's `providers`, or a

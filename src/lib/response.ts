@@ -47,7 +47,11 @@ export class ResponseWriter {
       init.status = status;
       this.wroteStatus = true;
     } else if (this.wroteStatus) {
-      init.status = this.originalStatus;
+      if (this.originalStatus === undefined) {
+        delete init.status;
+      } else {
+        init.status = this.originalStatus;
+      }
       this.wroteStatus = false;
     }
 

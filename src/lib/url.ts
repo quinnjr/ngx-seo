@@ -1,5 +1,3 @@
-import type { SeoCanonicalPolicy } from './types';
-
 function parse(value: string, base?: string): URL | null {
   try {
     return new URL(value, base);
@@ -45,7 +43,7 @@ export function originOf(base: string | null): string | null {
 export function canonicalFor(
   path: string,
   base: string | null,
-  policy: Required<SeoCanonicalPolicy>,
+  policy: { trailingSlash: 'preserve' | 'always' | 'never'; keepQueryParams: readonly string[] },
 ): string | null {
   const origin = originOf(base);
   if (origin === null) {

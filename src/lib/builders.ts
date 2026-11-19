@@ -59,7 +59,7 @@ export function faqPage(input: readonly FaqItem[] | Typed<{ items: readonly FaqI
   });
 }
 
-export type AnswerInput = Typed<{ text: string; upvoteCount?: number; url?: string; author?: string | NodeRef; datePublished?: string }>;
+export type AnswerInput = Typed<{ text: string; upvoteCount?: number | undefined; url?: string | undefined; author?: string | NodeRef | undefined; datePublished?: string | undefined }>;
 
 function answer(input: AnswerInput): JsonLdNode {
   const { author, ...rest } = input;
@@ -69,11 +69,11 @@ function answer(input: AnswerInput): JsonLdNode {
 export function qaPage(
   input: Typed<{
     question: string;
-    text?: string;
-    acceptedAnswer?: AnswerInput;
-    suggestedAnswers?: readonly AnswerInput[];
-    author?: string | NodeRef;
-    datePublished?: string;
+    text?: string | undefined;
+    acceptedAnswer?: AnswerInput | undefined;
+    suggestedAnswers?: readonly AnswerInput[] | undefined;
+    author?: string | NodeRef | undefined;
+    datePublished?: string | undefined;
   }>,
 ): JsonLdNode {
   const { question, text, acceptedAnswer, suggestedAnswers, author, datePublished, ...rest } = input;
@@ -92,10 +92,10 @@ export function qaPage(
   });
 }
 
-export type HowToStepInput = string | Typed<{ text: string; name?: string; url?: string; image?: string }>;
+export type HowToStepInput = string | Typed<{ text: string; name?: string | undefined; url?: string | undefined; image?: string | undefined }>;
 
 export function howTo(
-  input: Typed<{ name: string; steps: readonly HowToStepInput[]; supply?: readonly string[]; tool?: readonly string[]; totalTime?: string }>,
+  input: Typed<{ name: string; steps: readonly HowToStepInput[]; supply?: readonly string[] | undefined; tool?: readonly string[] | undefined; totalTime?: string | undefined }>,
 ): JsonLdNode {
   const { steps, supply, tool, ...rest } = input;
   return node('HowTo', {
@@ -110,7 +110,7 @@ export function howTo(
   });
 }
 
-export function speakable(input: Typed<{ cssSelector?: readonly string[]; xpath?: readonly string[] }>): JsonLdNode {
+export function speakable(input: Typed<{ cssSelector?: readonly string[] | undefined; xpath?: readonly string[] | undefined }>): JsonLdNode {
   return node('SpeakableSpecification', input);
 }
 
@@ -118,14 +118,14 @@ export function speakable(input: Typed<{ cssSelector?: readonly string[]; xpath?
 
 export type CreativeWorkInput = Typed<{
   headline: string;
-  description?: string;
-  image?: string | readonly string[] | Extra;
-  author?: string | NodeRef | readonly (string | NodeRef)[];
-  publisher?: string | NodeRef;
-  datePublished?: string;
-  dateModified?: string;
-  url?: string;
-  mainEntityOfPage?: string | NodeRef;
+  description?: string | undefined;
+  image?: string | readonly string[] | Extra | undefined;
+  author?: string | NodeRef | readonly (string | NodeRef)[] | undefined;
+  publisher?: string | NodeRef | undefined;
+  datePublished?: string | undefined;
+  dateModified?: string | undefined;
+  url?: string | undefined;
+  mainEntityOfPage?: string | NodeRef | undefined;
 }>;
 
 function creativeWork(type: string, input: CreativeWorkInput): JsonLdNode {
@@ -145,14 +145,14 @@ export function blogPosting(input: CreativeWorkInput): JsonLdNode {
   return creativeWork('BlogPosting', input);
 }
 
-export function webPage(input: Typed<{ name?: string; description?: string; url?: string; speakable?: JsonLdNode }>): JsonLdNode {
+export function webPage(input: Typed<{ name?: string | undefined; description?: string | undefined; url?: string | undefined; speakable?: JsonLdNode | undefined }>): JsonLdNode {
   return node('WebPage', input);
 }
 
 export interface BreadcrumbItem {
   name: string;
   /** Omit for the current page. */
-  url?: string;
+  url?: string | undefined;
 }
 
 export function breadcrumbList(input: readonly BreadcrumbItem[] | Typed<{ items: readonly BreadcrumbItem[] }>): JsonLdNode {
@@ -167,11 +167,11 @@ export function breadcrumbList(input: readonly BreadcrumbItem[] | Typed<{ items:
 
 // ---------------------------------------------------------------- entities
 
-export function organization(input: Typed<{ name: string; url?: string; logo?: string | Extra; sameAs?: readonly string[] }>): JsonLdNode {
+export function organization(input: Typed<{ name: string; url?: string | undefined; logo?: string | Extra | undefined; sameAs?: readonly string[] | undefined }>): JsonLdNode {
   return node('Organization', input);
 }
 
-export function webSite(input: Typed<{ name: string; url?: string; searchUrlTemplate?: string }>): JsonLdNode {
+export function webSite(input: Typed<{ name: string; url?: string | undefined; searchUrlTemplate?: string | undefined }>): JsonLdNode {
   const { searchUrlTemplate, ...rest } = input;
   return node('WebSite', {
     ...rest,
@@ -186,13 +186,13 @@ export function webSite(input: Typed<{ name: string; url?: string; searchUrlTemp
   });
 }
 
-export function person(input: Typed<{ name: string; url?: string; jobTitle?: string; sameAs?: readonly string[] }>): JsonLdNode {
+export function person(input: Typed<{ name: string; url?: string | undefined; jobTitle?: string | undefined; sameAs?: readonly string[] | undefined }>): JsonLdNode {
   return node('Person', input);
 }
 
 // ---------------------------------------------------------------- commercial
 
-export type OfferInput = Typed<{ price?: string | number; priceCurrency?: string; name?: string; availability?: string; url?: string }>;
+export type OfferInput = Typed<{ price?: string | number | undefined; priceCurrency?: string | undefined; name?: string | undefined; availability?: string | undefined; url?: string | undefined }>;
 
 export function offer(input: OfferInput): JsonLdNode {
   return node('Offer', input);
@@ -201,10 +201,10 @@ export function offer(input: OfferInput): JsonLdNode {
 export function aggregateOffer(
   input: Typed<{
     offers: readonly JsonLdNode[];
-    priceCurrency?: string;
-    lowPrice?: string | number;
-    highPrice?: string | number;
-    offerCount?: number;
+    priceCurrency?: string | undefined;
+    lowPrice?: string | number | undefined;
+    highPrice?: string | number | undefined;
+    offerCount?: number | undefined;
   }>,
 ): JsonLdNode {
   const { offers, priceCurrency, lowPrice, highPrice, offerCount, ...rest } = input;
@@ -235,14 +235,14 @@ export function aggregateOffer(
 }
 
 export function product(
-  input: Typed<{ name: string; description?: string; image?: string | readonly string[]; brand?: string | NodeRef; offers?: JsonLdNode | readonly JsonLdNode[]; sku?: string }>,
+  input: Typed<{ name: string; description?: string | undefined; image?: string | readonly string[] | undefined; brand?: string | NodeRef | undefined; offers?: JsonLdNode | readonly JsonLdNode[] | undefined; sku?: string | undefined }>,
 ): JsonLdNode {
   const { brand, ...rest } = input;
   return node('Product', { ...rest, brand: brand === undefined ? undefined : named('Brand', brand) });
 }
 
 export function service(
-  input: Typed<{ name: string; description?: string; provider?: string | NodeRef; serviceType?: string; areaServed?: unknown; offers?: JsonLdNode | readonly JsonLdNode[] }>,
+  input: Typed<{ name: string; description?: string | undefined; provider?: string | NodeRef | undefined; serviceType?: string | undefined; areaServed?: unknown | undefined; offers?: JsonLdNode | readonly JsonLdNode[] | undefined }>,
 ): JsonLdNode {
   const { provider, ...rest } = input;
   return node('Service', { ...rest, provider: provider === undefined ? undefined : named('Organization', provider) });

@@ -10,7 +10,7 @@ function isNoindex(robots: string | null): boolean {
  */
 export interface DiagnoseOptions {
   /** False when another TitleStrategy sets the document title. */
-  checkTitle?: boolean;
+  checkTitle?: boolean | undefined;
 }
 
 export function diagnose(

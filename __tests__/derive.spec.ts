@@ -699,4 +699,25 @@ describe('resolveHead', () => {
     expect(head.tags.some((t) => t.attrs['name'] === 'og:type')).toBe(false);
     expect(onError).toHaveBeenCalledTimes(2);
   });
+
+  it('reports wrongly typed values in Open Graph, links, meta, bots and image', () => {
+    const cases: [string, SeoConfig][] = [
+      ['book isbn', { openGraph: { book: { isbn: 9780306406157 as never } } }],
+      ['profile', { openGraph: { profile: { firstName: 42 as never } } }],
+      ['video type', { openGraph: { videos: [{ url: '/v.mp4', type: 5 as never }] } }],
+      ['hreflang', { alternates: [{ hreflang: 5 as never, href: '/fr' }] }],
+      ['link rel', { links: [{ rel: 5 as never, href: '/x' }] }],
+      ['link attribute', { links: [{ rel: 'preload', href: '/x', as: 5 as never }] }],
+      ['meta name', { meta: [{ name: 5 as never, content: 'x' }] }],
+      ['meta media', { meta: [{ name: 'theme-color', content: '#fff', media: 5 as never }] }],
+      ['bots entry', { bots: { googlebot: 5 as never } }],
+      ['image array', { image: ['/a.png'] as never }],
+    ];
+    for (const [label, config] of cases) {
+      const onError = vi.fn();
+      resolveHead(config, site, { path: '/', origin: null, onError });
+      expect(onError, label).toHaveBeenCalledTimes(1);
+    }
+  });
 });
+
