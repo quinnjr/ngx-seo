@@ -265,7 +265,7 @@ describe('mergeLayers', () => {
       const merged = mergeLayers([payload]);
       expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
       expect(Object.prototype).not.toHaveProperty('polluted');
-      expect(merged.robots).toEqual({});
+      expect(merged.robots).toBeUndefined();
     });
   });
 
@@ -564,4 +564,34 @@ describe('mergeLayers', () => {
     expect(merged.meta).toEqual([{ property: 'og:image', content: '/site.png' }]);
     expect(merged.links).toEqual([]);
   });
+
+  it('treats an object whose fields are all undefined as no opinion', () => {
+    const merged = mergeLayers([
+      { robots: 'noindex, nofollow', bots: { googlebot: 'noarchive' } },
+      { robots: { index: undefined }, bots: { googlebot: { maxSnippet: undefined } } },
+    ]);
+    expect(merged.robots).toBe('noindex, nofollow');
+    expect(merged.bots).toEqual({ googlebot: 'noarchive' });
+    const extras = mergeLayers([
+      { meta: [{ name: 'robots', content: 'max-image-preview:large' }, { name: 'googlebot', content: 'noarchive' }] },
+      { robots: { index: undefined }, bots: { googlebot: { maxSnippet: undefined } } },
+    ]);
+    expect(extras.meta).toHaveLength(2);
+  });
+
+  it('lets twitter.image release a lower twitter:image:alt extra', () => {
+    const merged = mergeLayers([
+      { meta: [{ name: 'twitter:image', content: '/site.png' }, { name: 'twitter:image:alt', content: 'Site logo' }] },
+      { twitter: { image: '/page.png' } },
+    ]);
+    expect(merged.meta).toEqual([]);
+  });
+
+  it('skips a blank URL in an Open Graph images list without reporting it', () => {
+    const onError = vi.fn();
+    const merged = mergeLayers([{ openGraph: { images: [{ url: '/a.png' }] } }, { openGraph: { images: ['', '  '] as never } }], onError);
+    expect(merged.openGraph?.images).toEqual([{ url: '/a.png' }]);
+    expect(onError).not.toHaveBeenCalled();
+  });
 });
+

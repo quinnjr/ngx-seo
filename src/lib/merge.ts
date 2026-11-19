@@ -207,7 +207,11 @@ function mergeKeyedList(
 
   for (const raw of incoming) {
     // A bare URL is accepted where an image object is expected.
-    const item = path === 'openGraph.images' && typeof raw === 'string' && raw !== '' ? { url: raw } : raw;
+    // A blank image URL (an empty CMS field) has no opinion and is not an error.
+    if (path === 'openGraph.images' && typeof raw === 'string' && raw.trim() === '') {
+      continue;
+    }
+    const item = path === 'openGraph.images' && typeof raw === 'string' ? { url: raw } : raw;
     if (isRemoval(item)) {
       removeAll(result, item.$remove);
       continue;
@@ -366,6 +370,10 @@ function mergeFields(
       onError(new Error(`ngx-seo: dropped a cyclic value at ${here}`));
       continue;
     }
+    // An object with no set entry (every field undefined or blank) has no opinion.
+    if (isPlainObject(value) && !ATOMIC_OBJECTS.has(here) && !hasSetEntry(value)) {
+      continue;
+    }
     if (isPlainObject(value) && !ATOMIC_OBJECTS.has(here)) {
       const existing = Object.hasOwn(target, key) ? target[key] : undefined;
       // An object never merges into a non-object (e.g. a raw robots string): it replaces it.
@@ -432,7 +440,7 @@ const TWITTER_META: Record<string, string[]> = {
   creator: ['twitter:creator'],
   title: ['twitter:title'],
   description: ['twitter:description'],
-  image: ['twitter:image'],
+  image: ['twitter:image*'],
   imageAlt: ['twitter:image:alt'],
 };
 
@@ -442,6 +450,11 @@ function hasMediaItem(value: unknown): boolean {
   return list.some((item) =>
     typeof item === 'string' ? item.trim() !== '' : isPlainObject(item) && !isRemoval(item) && typeof item['url'] === 'string' && item['url'].trim() !== '',
   );
+}
+
+/** Whether an object sets anything: a value other than undefined or blank text (null counts: it removes). */
+function hasSetEntry(value: Bag): boolean {
+  return safeEntries(value).some(([, inner]) => isSet(inner));
 }
 
 /** The same rule as merging: undefined, '' and whitespace-only text have no opinion. */
@@ -491,7 +504,8 @@ function releaseClaimedExtras(result: Bag, rawLayer: Bag): void {
     const value = layer[field];
     // An image without a URL has no opinion, so it claims nothing.
     const imageWithoutUrl = field === 'image' && isPlainObject(value) && !isSet(value['url']);
-    if (isSet(value) && !imageWithoutUrl) {
+    const emptyObject = isPlainObject(value) && !hasSetEntry(value);
+    if (isSet(value) && !imageWithoutUrl && !emptyObject) {
       claims.push(...metas);
     }
   }
@@ -526,7 +540,7 @@ function releaseClaimedExtras(result: Bag, rawLayer: Bag): void {
   if (isPlainObject(layer['bots'])) {
     // Only crawlers given a real value claim; an undefined entry has no opinion.
     for (const [bot, directives] of Object.entries(layer['bots'])) {
-      if (isSet(directives) && directives !== null) {
+      if (isSet(directives) && directives !== null && !(isPlainObject(directives) && !hasSetEntry(directives))) {
         claims.push(bot.toLowerCase());
       }
     }
