@@ -197,11 +197,18 @@ when you come back.
   this is what stops them leaking onto other pages. This holds even when the
   service is created while the route's injector is being built (an
   environment initializer, a lazy NgModule constructor).
-- **In a service from a module that a standalone component imports,** it
-  follows that component. If the component is routed, the contribution
-  applies while the component is shown: a page on every visit and route, a
-  layout across all its child pages. If the component sits outside the
-  router outlet (a shell widget), it applies app-wide.
+- **In a service from a module that a standalone component imports:**
+  - **A component shown in a primary router outlet:** the contribution
+    applies while that component is shown, on every visit and route, and
+    for a layout across all its child pages.
+  - **A component in a named outlet:** the contribution never applies.
+  - **A component created another way** (rendered dynamically or deferred
+    inside a page, or toggled on later outside the outlet): the contribution
+    is scoped to the page that was active when it was made.
+  - **A shell component shown before the first page is routed:** the
+    contribution applies app-wide.
+  - **For an app-wide contribution from a widget shown later,** provide the
+    service at root, or call `injectSeo` in the component itself.
 - **In a root service,** the contribution applies everywhere until it is
   destroyed.
 

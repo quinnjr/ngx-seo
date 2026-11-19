@@ -27,6 +27,7 @@ import {
 import { APP_BASE_HREF, isPlatformBrowser, isPlatformServer } from '@angular/common';
 import {
   ChildrenOutletContexts,
+  type OutletContext,
   NavigationCancel,
   NavigationEnd,
   NavigationError,
@@ -102,6 +103,8 @@ interface Contribution {
   readonly route: ActivatedRoute | Route | null;
   /** A non-root service injector, resolved to its route when evaluated. */
   readonly injector: EnvironmentInjector | null;
+  /** For an injector-bound contribution: the page route config active when it was made, if any. */
+  readonly creationRoute: Route | null;
 
   readonly priority: number;
   readonly order: number;
@@ -438,6 +441,7 @@ export class Seo {
       hostId,
       route: boundRoute,
       injector,
+      creationRoute: injector === null ? null : this.currentPageRoute(),
       priority: options.priority ?? 0,
       order: order ?? this.nextOrder++,
       value,
@@ -686,12 +690,20 @@ export class Seo {
       // If a routed component owns it, it applies while that component is shown
       // (a layout across its child pages, a page on every visit and route).
       // A component outside the router outlet makes it app-wide.
-      const routed = this.routedOwnerShown(item.injector);
-      if (routed) {
+      const owner = this.ownerOutlet(item.injector);
+      if (owner !== null) {
         this.routedOwners.add(item);
-        return true;
+        // Named outlets never contribute.
+        return owner === 'primary';
       }
-      return !this.routedOwners.has(item);
+      if (this.routedOwners.has(item)) {
+        return false;
+      }
+      // No shown routed component owns it (a widget rendered dynamically or
+      // deferred inside a page, or a component outside the outlet). Scope it
+      // to the page that was active when it was made; only one made before any
+      // page was routed (a shell component) applies app-wide.
+      return item.creationRoute === null || attached.has(item.creationRoute);
     }
     return true;
   }
@@ -721,24 +733,43 @@ export class Seo {
    * injector: the component's environment injector is the injector or one of
    * its ancestors.
    */
-  private routedOwnerShown(injector: EnvironmentInjector): boolean {
+  private ownerOutlet(injector: EnvironmentInjector): 'primary' | 'named' | null {
     const ancestors = new Set<unknown>();
     let current: unknown = injector;
     while (current !== null && current !== undefined && current !== this.rootInjector) {
       ancestors.add(current);
       current = (current as { parent?: unknown }).parent;
     }
-    let context = this.outletContexts?.getContext(PRIMARY_OUTLET) ?? null;
-    while (context !== null) {
-      // `activated` is the outlet's ComponentRef; the outlet exposes no public accessor for it.
-      const activated = (context.outlet as unknown as { activated?: ComponentRef<unknown> | null } | null)?.activated;
-      const environment = activated?.injector.get(EnvironmentInjector, null);
-      if (environment !== null && environment !== undefined && ancestors.has(environment)) {
-        return true;
+    type Contexts = { contexts?: Map<string, OutletContext> } | null | undefined;
+    const visit = (contexts: Contexts, primaryChain: boolean): 'primary' | 'named' | null => {
+      // ChildrenOutletContexts keeps its contexts in a private map; there is no public list.
+      for (const [name, context] of contexts?.contexts ?? []) {
+        const onPrimary = primaryChain && name === PRIMARY_OUTLET;
+        // `activated` is the outlet's ComponentRef; the outlet exposes no public accessor for it.
+        const activated = (context.outlet as unknown as { activated?: ComponentRef<unknown> | null } | null)?.activated;
+        const environment = activated?.injector.get(EnvironmentInjector, null);
+        if (environment !== null && environment !== undefined && ancestors.has(environment)) {
+          return onPrimary ? 'primary' : 'named';
+        }
+        const found = visit(context.children as unknown as Contexts, onPrimary);
+        if (found !== null) {
+          return found;
+        }
       }
-      context = context.children.getContext(PRIMARY_OUTLET);
+      return null;
+    };
+    return visit(this.outletContexts as unknown as Contexts, true);
+  }
+
+  /** The deepest primary route config currently routed, or null before any page is routed. */
+  private currentPageRoute(): Route | null {
+    let route: ActivatedRoute | null = this.router?.routerState.root ?? null;
+    let deepest: ActivatedRoute | null = null;
+    while (route !== null) {
+      deepest = route;
+      route = route.children.find((child) => child.outlet === PRIMARY_OUTLET) ?? null;
     }
-    return false;
+    return deepest?.snapshot?.routeConfig ?? null;
   }
 
   /**

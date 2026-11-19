@@ -665,4 +665,15 @@ describe('resolveHead', () => {
     expect(value(head, 'meta:property:og:image:height')).toBeUndefined();
     expect(onError).toHaveBeenCalledTimes(9);
   });
+
+  it('reports the robots value of the emitted tag, extra meta included', () => {
+    const overridden = resolveHead(
+      mergeLayers([{ robots: { index: false } }, { meta: [{ name: 'robots', content: 'index, follow' }] }]),
+      site,
+      { path: '/', origin: null },
+    );
+    expect(overridden.robots).toBe('index, follow');
+    expect(resolve({ meta: [{ name: 'robots', content: 'noindex' }] }).robots).toBe('noindex');
+  });
 });
+

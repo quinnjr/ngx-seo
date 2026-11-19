@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Input, Component, ErrorHandler, InjectionToken, inject, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { APP_BASE_HREF } from '@angular/common';
+import { APP_BASE_HREF, NgComponentOutlet } from '@angular/common';
 import {
   ActivatedRouteSnapshot,
   BaseRouteReuseStrategy,
@@ -559,7 +559,7 @@ describe('route lifecycle', () => {
       expect(seen).toEqual(['noindex', 'noindex', null, 'noindex']);
     });
 
-    it('applies app-wide for a module service of a component outside the router outlet', async () => {
+    it('applies app-wide for a module service of a shell component shown before the first navigation', async () => {
       @Injectable()
       class WidgetSeo {
         readonly seo = injectSeo({ author: 'widget' });
@@ -587,17 +587,58 @@ describe('route lifecycle', () => {
           provideSeo({ baseUrl: 'https://x.test', diagnostics: 'off' }),
         ],
       });
+      show.set(true);
       const fixture = TestBed.createComponent(Root);
+      await fixture.whenStable();
       const router = TestBed.inject(Router);
       await router.navigateByUrl('/a');
-      await fixture.whenStable();
-      show.set(true);
       await fixture.whenStable();
       const seen = [meta('author')];
       await router.navigateByUrl('/b');
       await fixture.whenStable();
       seen.push(meta('author'));
       expect(seen).toEqual(['widget', 'widget']);
+    });
+
+    it('scopes a module service of a widget rendered dynamically in a page to that page', async () => {
+      @NgModule({ providers: [DraftSeo] })
+      class WidgetModule2 {}
+      @Component({ selector: 'seo-dyn-widget', imports: [WidgetModule2], template: '' })
+      class DynWidget {
+        readonly service = inject(DraftSeo);
+      }
+      @Component({ selector: 'seo-dyn-page', imports: [NgComponentOutlet], template: '<ng-container *ngComponentOutlet="widget" />' })
+      class DynPage {
+        readonly widget = DynWidget;
+      }
+      @Component({ selector: 'seo-plain-page', template: '' })
+      class PlainPage {}
+      const { go } = await setup([
+        { path: 'a', component: DynPage },
+        { path: 'b', component: PlainPage },
+      ]);
+      const seen: (string | null)[] = [];
+      for (const url of ['/a', '/b', '/a']) {
+        await go(url);
+        seen.push(meta('robots'));
+      }
+      expect(seen).toEqual(['noindex', null, 'noindex']);
+    });
+
+    it('never applies a module service of a component in a named outlet', async () => {
+      @NgModule({ providers: [DraftSeo] })
+      class ChatModule {}
+      @Component({ selector: 'seo-chat', imports: [ChatModule], template: '' })
+      class Chat {
+        readonly service = inject(DraftSeo);
+      }
+      @Component({ selector: 'seo-shell4', imports: [RouterOutlet], template: '<router-outlet /><router-outlet name="side" />' })
+      class Shell4 {}
+      const { go } = await setup([{ path: 'a', component: Shell4, children: [{ path: 'chat', outlet: 'side', component: Chat }] }]);
+      await go('/a/(side:chat)');
+      expect(meta('robots')).toBeNull();
+      await go('/a');
+      expect(meta('robots')).toBeNull();
     });
 
     it('follows a standalone page that imports the service module, on every visit and route', async () => {

@@ -795,5 +795,7 @@ export function resolveHead(merged: SeoConfig, site: SeoSiteConfig, env: Resolve
     }
   });
 
-  return { title, htmlAttrs, tags: list.tags, http, canonical, robots, droppedUrls };
+  // Report the robots value actually emitted, an extra robots meta included.
+  const emittedRobots = list.find('meta:name:robots')?.attrs['content'] ?? null;
+  return { title, htmlAttrs, tags: list.tags, http, canonical, robots: emittedRobots, droppedUrls };
 }
