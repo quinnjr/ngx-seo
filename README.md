@@ -21,14 +21,14 @@ duplicates after hydration and nothing stale after a client navigation.
 ## Install
 
 ```sh
-pnpm add ngx-seo
+pnpm add @quinnjr/ngx-seo
 ```
 
 ## Setup
 
 ```ts
 // app.config.ts
-import { provideSeo, organization, webSite } from 'ngx-seo';
+import { provideSeo, organization, webSite } from '@quinnjr/ngx-seo';
 
 export const appConfig: ApplicationConfig = {
   providers: [
