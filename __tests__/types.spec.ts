@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { ActivatedRouteSnapshot } from '@angular/router';
 import type { BlogPosting, Organization, Thing, WithContext } from 'schema-dts';
 import type { RouteSeo, SeoConfig, SeoHandle, SeoMetaTag } from '../src/lib/types';
+import { breadcrumbList, faqPage, howTo, type BreadcrumbItem, type FaqItem } from '../src/lib/builders';
 
 describe('public types', () => {
   it('accepts a route function typed with ActivatedRouteSnapshot', () => {
@@ -30,6 +31,19 @@ describe('public types', () => {
     const handle: SeoHandle = { set: () => {}, patch: () => {}, clear: () => {}, destroy: () => {} };
     handle.set(() => ({ title: 'reactive' }));
     expect(typeof handle.set).toBe('function');
+  });
+
+  it('accepts readonly arrays everywhere a list is taken', () => {
+    const keywords: readonly string[] = ['a'];
+    const items: readonly FaqItem[] = [{ question: 'Q', answer: 'A' }];
+    const crumbs: readonly BreadcrumbItem[] = [{ name: 'Home', url: '/' }];
+    const config: SeoConfig = {
+      keywords,
+      alternates: [{ hreflang: 'fr', href: '/fr' }] as const,
+      openGraph: { alternateLocales: ['fr_FR'] as const, article: { tags: ['x'] as const, authors: ['a'] as const } },
+      jsonLd: [faqPage(items), breadcrumbList(crumbs), howTo({ name: 'H', steps: ['s'] as const, supply: ['p'] as const })],
+    };
+    expect(config.keywords).toBe(keywords);
   });
 });
 

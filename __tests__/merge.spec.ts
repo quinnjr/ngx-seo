@@ -248,7 +248,7 @@ describe('mergeLayers', () => {
     const snapshot = JSON.stringify([low, high]);
     const merged = mergeLayers([low, high]);
     (merged.openGraph as { title: string }).title = 'changed';
-    merged.jsonLd?.push({ '@type': 'C' });
+    (merged.jsonLd as unknown as unknown[] | undefined)?.push({ '@type': 'C' });
     expect(JSON.stringify([low, high])).toBe(snapshot);
   });
 

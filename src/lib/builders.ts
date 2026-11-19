@@ -12,7 +12,12 @@ export type Extra = { [key: string]: unknown };
 /** A node reference such as `{ '@id': '/#org' }`, or any node. */
 export type NodeRef = { '@id': string } | JsonLdNode;
 
-type Typed<T> = T & Extra & { '@type'?: string | string[]; '@id'?: string };
+type Typed<T> = T & Extra & { '@type'?: string | readonly string[]; '@id'?: string };
+
+/** `Array.isArray` that also narrows readonly arrays. */
+function isList<T>(value: unknown): value is readonly T[] {
+  return Array.isArray(value);
+}
 
 function node(type: string, input: Extra): JsonLdNode {
   const out: JsonLdNode = { '@type': type };
@@ -28,11 +33,11 @@ function named(type: string, value: string | NodeRef | Extra): unknown {
   return typeof value === 'string' ? { '@type': type, name: value } : value;
 }
 
-function namedList(type: string, value: string | NodeRef | (string | NodeRef)[] | undefined): unknown {
+function namedList(type: string, value: string | NodeRef | readonly (string | NodeRef)[] | undefined): unknown {
   if (value === undefined) {
     return undefined;
   }
-  return Array.isArray(value) ? value.map((item) => named(type, item)) : named(type, value);
+  return isList(value) ? value.map((item) => named(type, item)) : named(type, value);
 }
 
 // ---------------------------------------------------------------- answer-shaped
@@ -42,8 +47,8 @@ export interface FaqItem {
   answer: string;
 }
 
-export function faqPage(input: FaqItem[] | Typed<{ items: FaqItem[] }>): JsonLdNode {
-  const { items, ...rest } = Array.isArray(input) ? { items: input } : input;
+export function faqPage(input: readonly FaqItem[] | Typed<{ items: readonly FaqItem[] }>): JsonLdNode {
+  const { items, ...rest } = isList(input) ? { items: input } : input;
   return node('FAQPage', {
     ...rest,
     mainEntity: items.map((item) => ({
@@ -66,7 +71,7 @@ export function qaPage(
     question: string;
     text?: string;
     acceptedAnswer?: AnswerInput;
-    suggestedAnswers?: AnswerInput[];
+    suggestedAnswers?: readonly AnswerInput[];
     author?: string | NodeRef;
     datePublished?: string;
   }>,
@@ -90,7 +95,7 @@ export function qaPage(
 export type HowToStepInput = string | Typed<{ text: string; name?: string; url?: string; image?: string }>;
 
 export function howTo(
-  input: Typed<{ name: string; steps: HowToStepInput[]; supply?: string[]; tool?: string[]; totalTime?: string }>,
+  input: Typed<{ name: string; steps: readonly HowToStepInput[]; supply?: readonly string[]; tool?: readonly string[]; totalTime?: string }>,
 ): JsonLdNode {
   const { steps, supply, tool, ...rest } = input;
   return node('HowTo', {
@@ -105,7 +110,7 @@ export function howTo(
   });
 }
 
-export function speakable(input: Typed<{ cssSelector?: string[]; xpath?: string[] }>): JsonLdNode {
+export function speakable(input: Typed<{ cssSelector?: readonly string[]; xpath?: readonly string[] }>): JsonLdNode {
   return node('SpeakableSpecification', input);
 }
 
@@ -114,8 +119,8 @@ export function speakable(input: Typed<{ cssSelector?: string[]; xpath?: string[
 export type CreativeWorkInput = Typed<{
   headline: string;
   description?: string;
-  image?: string | string[] | Extra;
-  author?: string | NodeRef | (string | NodeRef)[];
+  image?: string | readonly string[] | Extra;
+  author?: string | NodeRef | readonly (string | NodeRef)[];
   publisher?: string | NodeRef;
   datePublished?: string;
   dateModified?: string;
@@ -150,8 +155,8 @@ export interface BreadcrumbItem {
   url?: string;
 }
 
-export function breadcrumbList(input: BreadcrumbItem[] | Typed<{ items: BreadcrumbItem[] }>): JsonLdNode {
-  const { items, ...rest } = Array.isArray(input) ? { items: input } : input;
+export function breadcrumbList(input: readonly BreadcrumbItem[] | Typed<{ items: readonly BreadcrumbItem[] }>): JsonLdNode {
+  const { items, ...rest } = isList(input) ? { items: input } : input;
   return node('BreadcrumbList', {
     ...rest,
     itemListElement: items.map((item, index) =>
@@ -162,7 +167,7 @@ export function breadcrumbList(input: BreadcrumbItem[] | Typed<{ items: Breadcru
 
 // ---------------------------------------------------------------- entities
 
-export function organization(input: Typed<{ name: string; url?: string; logo?: string | Extra; sameAs?: string[] }>): JsonLdNode {
+export function organization(input: Typed<{ name: string; url?: string; logo?: string | Extra; sameAs?: readonly string[] }>): JsonLdNode {
   return node('Organization', input);
 }
 
@@ -181,7 +186,7 @@ export function webSite(input: Typed<{ name: string; url?: string; searchUrlTemp
   });
 }
 
-export function person(input: Typed<{ name: string; url?: string; jobTitle?: string; sameAs?: string[] }>): JsonLdNode {
+export function person(input: Typed<{ name: string; url?: string; jobTitle?: string; sameAs?: readonly string[] }>): JsonLdNode {
   return node('Person', input);
 }
 
@@ -195,7 +200,7 @@ export function offer(input: OfferInput): JsonLdNode {
 
 export function aggregateOffer(
   input: Typed<{
-    offers: JsonLdNode[];
+    offers: readonly JsonLdNode[];
     priceCurrency?: string;
     lowPrice?: string | number;
     highPrice?: string | number;
@@ -230,14 +235,14 @@ export function aggregateOffer(
 }
 
 export function product(
-  input: Typed<{ name: string; description?: string; image?: string | string[]; brand?: string | NodeRef; offers?: JsonLdNode | JsonLdNode[]; sku?: string }>,
+  input: Typed<{ name: string; description?: string; image?: string | readonly string[]; brand?: string | NodeRef; offers?: JsonLdNode | readonly JsonLdNode[]; sku?: string }>,
 ): JsonLdNode {
   const { brand, ...rest } = input;
   return node('Product', { ...rest, brand: brand === undefined ? undefined : named('Brand', brand) });
 }
 
 export function service(
-  input: Typed<{ name: string; description?: string; provider?: string | NodeRef; serviceType?: string; areaServed?: unknown; offers?: JsonLdNode | JsonLdNode[] }>,
+  input: Typed<{ name: string; description?: string; provider?: string | NodeRef; serviceType?: string; areaServed?: unknown; offers?: JsonLdNode | readonly JsonLdNode[] }>,
 ): JsonLdNode {
   const { provider, ...rest } = input;
   return node('Service', { ...rest, provider: provider === undefined ? undefined : named('Organization', provider) });

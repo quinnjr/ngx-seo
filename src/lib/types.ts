@@ -46,9 +46,9 @@ export interface OpenGraphArticle {
   publishedTime?: Date | string | null;
   modifiedTime?: Date | string | null;
   expirationTime?: Date | string | null;
-  authors?: string[] | null;
+  authors?: readonly string[] | null;
   section?: string | null;
-  tags?: string[] | null;
+  tags?: readonly string[] | null;
 }
 
 export interface OpenGraphProfile {
@@ -59,10 +59,10 @@ export interface OpenGraphProfile {
 }
 
 export interface OpenGraphBook {
-  authors?: string[] | null;
+  authors?: readonly string[] | null;
   isbn?: string | null;
   releaseDate?: Date | string | null;
-  tags?: string[] | null;
+  tags?: readonly string[] | null;
 }
 
 export interface OpenGraphConfig {
@@ -72,10 +72,10 @@ export interface OpenGraphConfig {
   url?: string | null;
   siteName?: string | null;
   locale?: string | null;
-  alternateLocales?: string[] | null;
-  images?: (SeoImage | SeoRemoval)[] | null;
-  videos?: SeoMedia[] | null;
-  audio?: SeoMedia[] | null;
+  alternateLocales?: readonly string[] | null;
+  images?: readonly (SeoImage | SeoRemoval)[] | null;
+  videos?: readonly SeoMedia[] | null;
+  audio?: readonly SeoMedia[] | null;
   article?: OpenGraphArticle | null;
   profile?: OpenGraphProfile | null;
   book?: OpenGraphBook | null;
@@ -155,7 +155,7 @@ export interface SeoConfig {
   title?: string | null;
   titleTemplate?: TitleTemplate | false | null;
   description?: string | null;
-  keywords?: string[] | string | null;
+  keywords?: readonly string[] | string | null;
   author?: string | null;
   lang?: string | null;
   dir?: 'ltr' | 'rtl' | 'auto' | null;
@@ -164,14 +164,14 @@ export interface SeoConfig {
   robots?: RobotsDirectives | string | null;
   /** Per-crawler robots meta, keyed by crawler name (e.g. `googlebot`). */
   bots?: Record<string, RobotsDirectives | string | null> | null;
-  alternates?: (SeoAlternate | SeoRemoval)[] | null;
+  alternates?: readonly (SeoAlternate | SeoRemoval)[] | null;
   /** Shorthand feeding Open Graph and Twitter. */
   image?: string | SeoImage | null;
   openGraph?: OpenGraphConfig | null;
   twitter?: TwitterConfig | null;
-  jsonLd?: (JsonLdNode | SeoRemoval)[] | null;
-  meta?: (SeoMetaTag | SeoRemoval)[] | null;
-  links?: (SeoLinkTag | SeoRemoval)[] | null;
+  jsonLd?: readonly (JsonLdNode | SeoRemoval)[] | null;
+  meta?: readonly (SeoMetaTag | SeoRemoval)[] | null;
+  links?: readonly (SeoLinkTag | SeoRemoval)[] | null;
   /** Server response control. Ignored in the browser. */
   http?: SeoHttp | null;
 }
@@ -214,12 +214,12 @@ export interface HeadTag {
 export interface ResolvedHead {
   title: string | null;
   htmlAttrs: { lang?: string; dir?: string };
-  tags: HeadTag[];
+  tags: readonly HeadTag[];
   http: { status?: number; headers: Record<string, string> };
   canonical: string | null;
   robots: string | null;
   /** Fields whose URL value was dropped because it could not be made absolute. */
-  droppedUrls: string[];
+  droppedUrls: readonly string[];
 }
 
 export interface SeoHandle {
