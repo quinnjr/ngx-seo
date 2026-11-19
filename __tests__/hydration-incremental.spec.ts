@@ -570,4 +570,33 @@ describe('incremental hydration', () => {
     appRef.destroy();
     destroyPlatform();
   });
+
+  it('never publishes server-only http values in the transferred state', async () => {
+    @Component({ selector: 'secret-page', template: '<p>s</p>' })
+    class SecretPage {
+      readonly seo = injectSeo({ title: 'T', http: { headers: { 'Set-Cookie': 'sid=SECRET123; HttpOnly', 'X-Internal': 'server-only' } } });
+    }
+    const html = await renderApplication(
+      (context: BootstrapContext) =>
+        bootstrapApplication(
+          App,
+          {
+            providers: [
+              provideZonelessChangeDetection(),
+              provideServerRendering(),
+              provideClientHydration(withIncrementalHydration()),
+              provideRouter([{ path: 's', component: SecretPage }]),
+              provideSeo({ baseUrl: 'https://x.test' }),
+            ],
+          },
+          context,
+        ),
+      { document: SHELL, url: '/s' },
+    );
+    destroyPlatform();
+    expect(html).toContain('ngx-seo:contributions');
+    expect(html).not.toContain('SECRET123');
+    expect(html).not.toContain('server-only');
+  });
 });
+

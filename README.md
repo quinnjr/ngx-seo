@@ -489,7 +489,7 @@ After, on the route:
 
 ```sh
 pnpm install
-pnpm test        # vitest
+pnpm test        # tsc (normal and exactOptionalPropertyTypes) + vitest
 pnpm typecheck
 pnpm build       # ng-packagr, partial compilation → dist/
 pnpm release     # build, then publish from dist/

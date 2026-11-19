@@ -140,6 +140,18 @@ function primaryUrl(router: Router): string {
   }
 }
 
+/**
+ * A config without its server-only `http` part. Status and headers only go to
+ * the server response; they must never be published in the transferred state.
+ */
+function withoutHttp(config: SeoConfig): SeoConfig {
+  if (config === null || typeof config !== 'object' || !('http' in config)) {
+    return config;
+  }
+  const { http: _http, ...rest } = config;
+  return rest;
+}
+
 /** The value of a contribution that is waiting for a required input. */
 const NOT_READY: SeoConfig = Object.freeze({});
 
@@ -802,7 +814,7 @@ export class Seo {
     const recorded = this.recordedRouteCopies(routeKey).filter((id) => !this.claimedRouteCopies.has(id));
     let value: string;
     try {
-      value = JSON.stringify(typeof config === 'function' ? untracked(config) : config);
+      value = JSON.stringify(withoutHttp(typeof config === 'function' ? untracked(config) : config));
     } catch {
       return null;
     }
@@ -864,7 +876,7 @@ export class Seo {
         }
         try {
           // Only what survives JSON travels; functions (e.g. a title template) do not.
-          copies.push({ id: item.hostId, priority: item.priority, order: item.order, config: JSON.parse(JSON.stringify(config)) });
+          copies.push({ id: item.hostId, priority: item.priority, order: item.order, config: JSON.parse(JSON.stringify(withoutHttp(config))) });
         } catch (error) {
           this.report(error);
         }
