@@ -617,4 +617,44 @@ describe('incremental hydration', () => {
     appRef.destroy();
     destroyPlatform();
   });
+
+  it('keeps server copies through a fragment or query change on the same page', async () => {
+    @Component({ selector: 'faq-y', template: '<p>f</p>' })
+    class FaqY {
+      readonly seo = injectSeo({ jsonLd: [{ '@type': 'FAQPage', '@id': '#faq' }] });
+    }
+    @Component({ selector: 'page-y2', imports: [FaqY], template: '<p>page</p> @defer (hydrate never) { <faq-y /> }' })
+    class PageY2 {}
+    @Component({ selector: 'page-other', template: '<p>o</p>' })
+    class PageOther {}
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { appRef } = await hydrate(
+      App,
+      [
+        { path: 'f', component: PageY2 },
+        { path: 'o', component: PageOther },
+      ],
+      '/f',
+      { baseUrl: 'https://x.test' } as typeof site,
+    );
+    const graph = (): string => document.head.querySelector('script[type="application/ld+json"]')?.textContent ?? '';
+    expect(graph()).toContain('FAQPage');
+    const router = appRef.injector.get(Router);
+    await router.navigate(['/f'], { fragment: 'top' });
+    await appRef.whenStable();
+    appRef.tick();
+    expect(graph()).toContain('FAQPage');
+    await router.navigate(['/f'], { queryParams: { tab: 'reviews' } });
+    await appRef.whenStable();
+    appRef.tick();
+    expect(graph()).toContain('FAQPage');
+    await router.navigateByUrl('/o');
+    await appRef.whenStable();
+    appRef.tick();
+    expect(graph()).not.toContain('FAQPage');
+    errors.mockRestore();
+    appRef.destroy();
+    destroyPlatform();
+  });
 });
+

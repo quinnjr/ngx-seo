@@ -226,8 +226,10 @@ export class Seo {
   private readonly attached = signal<ReadonlySet<ActivatedRoute | Route> | null>(null);
   private nextOrder = 0;
   private reconcileScheduled = false;
-  /** NavigationEnd events seen; the second is the first client navigation. */
+  /** NavigationEnd events seen; the first is the initial navigation. */
   private navigations = 0;
+  /** The page of the initial navigation, without query or fragment. */
+  private initialPage: string | null = null;
   private nextHostId = 0;
   private readonly transferState = inject(TransferState);
   private readonly rootInjector = inject(EnvironmentInjector);
@@ -573,8 +575,13 @@ export class Seo {
     const subscription = router.events.subscribe((event) => {
       if (event instanceof NavigationEnd) {
         this.navigations++;
-        if (this.navigations === 2 && untracked(this.serverCopies).size > 0) {
-          // The first client navigation: the server's page is gone, and so are its copies.
+        // The page is the primary path without query or fragment: an anchor jump or a
+        // query change on the same page keeps the server's copies.
+        const page = primaryUrl(router).split('?')[0];
+        if (this.navigations === 1) {
+          this.initialPage = page;
+        } else if (page !== this.initialPage && untracked(this.serverCopies).size > 0) {
+          // The first navigation to another page: the server's page is gone, and so are its copies.
           this.serverCopies.set(new Map());
         }
         sync();

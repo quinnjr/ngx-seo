@@ -390,12 +390,13 @@ page asks to override it any more.
       give it a stable identity: `injectSeo(config, { key: 'product' })`.
       Without one, an unmatched live service still outranks every server
       copy, and its own leftover copy stays until the first client
-      navigation. Each copy is continued at most once, so a service that only
+      navigation to another page. Each copy is continued at most once, so a service that only
       exists in the browser never takes another service's copy.
     - **Before the owner hydrates:** a component inside `@defer (hydrate …)`
       keeps contributing the server's copy, ranked in the server's order.
     - **After:** once it hydrates, its own contribution takes over.
-    - **When copies are dropped:** on the first client navigation, or when
+    - **When copies are dropped:** on the first client navigation to another
+      page (an anchor jump or a query change on the same page keeps them), or when
       their host leaves the page or their route is detached.
     - **Not recorded:** contributions with neither a host nor a route (a
       root service, or `contribute()` without `host`/`route`).
