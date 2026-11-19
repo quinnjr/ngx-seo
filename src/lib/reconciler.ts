@@ -151,10 +151,14 @@ export interface HeadReconcilerOptions {
   restoreTitle?: boolean | undefined;
 }
 
+/**
+ * The server's record of the shell. `lang`/`dir` are present only when ngx-seo
+ * itself overrode that attribute, so the browser never undoes the app's own value.
+ */
 interface Originals {
   title: string;
-  lang: string | null;
-  dir: string | null;
+  lang?: string | null;
+  dir?: string | null;
 }
 
 function parseJson<T>(text: string | null): T | null {
@@ -180,6 +184,8 @@ export class HeadReconciler {
   /** The title the document shell had before ngx-seo touched it. */
   private readonly originalTitle: string;
   private readonly restoreTitle: boolean;
+  /** Server only: keep the shell record in step with the attributes ngx-seo overrides. */
+  private persistOriginals = false;
 
   constructor(
     private readonly doc: Document,
@@ -192,15 +198,15 @@ export class HeadReconciler {
       // Hydrating over server output: the shell values come from the server's record.
       this.originalTitle = typeof persisted.title === 'string' ? persisted.title : doc.title;
       for (const name of ['lang', 'dir'] as const) {
-        const original = persisted[name] ?? null;
-        if (html.getAttribute(name) !== original) {
-          this.htmlOriginals.set(name, original);
+        if (Object.hasOwn(persisted, name)) {
+          this.htmlOriginals.set(name, persisted[name] ?? null);
         }
       }
     } else {
       this.originalTitle = doc.title;
       if (options.persistOriginals && html) {
-        const record: Originals = { title: doc.title, lang: html.getAttribute('lang'), dir: html.getAttribute('dir') };
+        this.persistOriginals = true;
+        const record: Originals = { title: doc.title };
         html.setAttribute(SEO_ORIGINAL_ATTR, JSON.stringify(record));
       }
     }
@@ -351,6 +357,21 @@ export class HeadReconciler {
     }
   }
 
+  /** Server only: add (or, with undefined, remove) an overridden attribute's original in the shell record. */
+  private recordOriginal(name: 'lang' | 'dir', original: string | null | undefined): void {
+    const html = this.doc.documentElement;
+    if (!this.persistOriginals || !html) {
+      return;
+    }
+    const record = parseJson<Originals>(html.getAttribute(SEO_ORIGINAL_ATTR)) ?? { title: this.originalTitle };
+    if (original === undefined) {
+      delete record[name];
+    } else {
+      record[name] = original;
+    }
+    html.setAttribute(SEO_ORIGINAL_ATTR, JSON.stringify(record));
+  }
+
   private applyHtmlAttr(name: 'lang' | 'dir', value: string | undefined): void {
     const html = this.doc.documentElement;
     if (!html) {
@@ -359,6 +380,7 @@ export class HeadReconciler {
     if (value !== undefined) {
       if (!this.htmlOriginals.has(name)) {
         this.htmlOriginals.set(name, html.getAttribute(name));
+        this.recordOriginal(name, html.getAttribute(name));
       }
       if (html.getAttribute(name) !== value) {
         html.setAttribute(name, value);
@@ -368,6 +390,7 @@ export class HeadReconciler {
     if (this.htmlOriginals.has(name)) {
       const original = this.htmlOriginals.get(name) ?? null;
       this.htmlOriginals.delete(name);
+      this.recordOriginal(name, undefined);
       if (original === null) {
         html.removeAttribute(name);
       } else {

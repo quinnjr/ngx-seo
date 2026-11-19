@@ -356,3 +356,15 @@ describe('HeadReconciler href adoption', () => {
   });
 });
 
+describe('HeadReconciler html attributes it does not own', () => {
+  it('leaves an app-set lang alone after hydration when no layer sets lang', () => {
+    const doc = makeDoc('', 'lang="en"');
+    const server = new HeadReconciler(doc, { persistOriginals: true });
+    // The app's own i18n sets lang during server rendering.
+    doc.documentElement.setAttribute('lang', 'fr');
+    server.apply(headOf([], { title: 'Page' }));
+    new HeadReconciler(doc).apply(headOf([], { title: 'Page' }));
+    expect(doc.documentElement.getAttribute('lang')).toBe('fr');
+  });
+});
+
